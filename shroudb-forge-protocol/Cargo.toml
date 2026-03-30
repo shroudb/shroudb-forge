@@ -1,0 +1,22 @@
+[package]
+name = "shroudb-forge-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+shroudb-forge-core = { workspace = true }
+shroudb-forge-engine = { workspace = true }
+shroudb-acl = { workspace = true }
+shroudb-store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+shroudb-storage = { workspace = true }
+shroudb-crypto = { workspace = true }
+tempfile = "3"

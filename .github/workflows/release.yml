@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    uses: shroudb/.github/.github/workflows/rust-release.yml@main
+    permissions:
+      contents: write
+      packages: write
+    with:
+      product: "forge"
+      server_package: "shroudb-forge-server"
+      server_binary: "shroudb-forge"
+      cli_package: "shroudb-forge-cli"
+      cli_binary: "shroudb-forge-cli"
+      docker_server_target: "shroudb-forge"
+      docker_cli_target: "shroudb-forge-cli"
+      crates: "shroudb-forge-core,shroudb-forge-engine,shroudb-forge-protocol,shroudb-forge-client,shroudb-forge-server,shroudb-forge-cli"
+    secrets:
+      REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

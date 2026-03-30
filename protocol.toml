@@ -1,0 +1,258 @@
+# ShrouDB Forge Protocol Specification
+#
+# Machine-readable definition of the ShrouDB Forge protocol.
+# Used by shroudb-codegen to generate typed client libraries in any language.
+
+[protocol]
+name = "shroudb-forge"
+version = "1.0.0"
+description = "Internal certificate authority engine"
+default_tcp_port = 6699
+default_http_port = 6700
+uri_schemes = ["shroudb-forge://", "shroudb-forge+tls://"]
+uri_format = "{scheme}[token@]host[:port][/ca]"
+
+[protocol.wire_format]
+type = "resp3"
+request_format = "array_of_bulk_strings"
+success_envelope = "json_bulk_string"
+error_envelope = "simple_error"
+success_status_field = "status"
+success_status_value = "ok"
+
+# ─── Error codes ──────────────────────────────────────────────────────────────
+
+[error_codes]
+
+[error_codes.DENIED]
+description = "Authentication required or insufficient permissions"
+http_equiv = 401
+
+[error_codes.NOTFOUND]
+description = "CA or certificate not found"
+http_equiv = 404
+
+[error_codes.EXISTS]
+description = "CA already exists"
+http_equiv = 409
+
+[error_codes.DISABLED]
+description = "CA is disabled"
+http_equiv = 503
+
+[error_codes.NOKEY]
+description = "No active signing key available"
+http_equiv = 500
+
+[error_codes.BADARG]
+description = "Invalid argument or parameter"
+http_equiv = 400
+
+[error_codes.INTERNAL]
+description = "Unexpected server error"
+http_equiv = 500
+
+[error_codes.STORAGE]
+description = "Backend storage error"
+http_equiv = 502
+
+# ─── Types ────────────────────────────────────────────────────────────────────
+
+[types.ca_name]
+type = "string"
+description = "Certificate Authority name"
+constraints = "1-255 chars, [a-zA-Z0-9_-]"
+
+[types.algorithm]
+type = "string"
+description = "Signing algorithm"
+values = ["ecdsa-p256", "ecdsa-p384", "ed25519"]
+
+[types.subject]
+type = "string"
+description = "X.509 Distinguished Name (e.g., CN=Internal CA,O=Acme)"
+
+[types.ttl]
+type = "string"
+description = "TTL duration (e.g., 24h, 7d, 90d)"
+
+[types.serial]
+type = "string"
+description = "Hex-encoded certificate serial number (40 chars)"
+
+[types.certificate_pem]
+type = "string"
+description = "PEM-encoded X.509 certificate"
+
+[types.private_key_pem]
+type = "string"
+description = "PEM-encoded private key (returned at issuance only, never stored)"
+
+[types.profile]
+type = "string"
+description = "Certificate profile name (e.g., server, client, peer)"
+
+[types.revocation_reason]
+type = "string"
+description = "RFC 5280 revocation reason"
+values = ["unspecified", "key_compromise", "ca_compromise", "affiliation_changed", "superseded", "cessation_of_operation"]
+
+[types.cert_state]
+type = "string"
+values = ["active", "revoked", "expired"]
+
+# ─── Commands ─────────────────────────────────────────────────────────────────
+
+[commands.CA_CREATE]
+syntax = "CA CREATE <name> <algorithm> SUBJECT <subject> [TTL_DAYS <n>] [PARENT <ca>]"
+description = "Create a new Certificate Authority"
+parameters = [
+    { name = "name", type = "ca_name", required = true },
+    { name = "algorithm", type = "algorithm", required = true },
+    { name = "subject", type = "subject", required = true },
+    { name = "ttl_days", type = "integer", required = false },
+    { name = "parent", type = "ca_name", required = false },
+]
+response = { name = "string", subject = "string", algorithm = "string", active_version = "integer" }
+acl = "admin"
+
+[commands.CA_INFO]
+syntax = "CA INFO <name>"
+description = "Get CA metadata and key version status"
+parameters = [
+    { name = "name", type = "ca_name", required = true },
+]
+response = { name = "string", subject = "string", algorithm = "string", key_versions = "array" }
+acl = "namespace_read"
+acl_namespace = "forge.{name}.*"
+
+[commands.CA_LIST]
+syntax = "CA LIST"
+description = "List all Certificate Authorities"
+response = { cas = "array" }
+acl = "none"
+
+[commands.CA_ROTATE]
+syntax = "CA ROTATE <name> [FORCE] [DRYRUN]"
+description = "Rotate CA signing key"
+parameters = [
+    { name = "name", type = "ca_name", required = true },
+    { name = "force", type = "flag", required = false },
+    { name = "dryrun", type = "flag", required = false },
+]
+response = { key_version = "integer", previous_version = "integer", rotated = "boolean" }
+acl = "admin"
+
+[commands.CA_EXPORT]
+syntax = "CA EXPORT <name>"
+description = "Export the active CA certificate (PEM)"
+parameters = [
+    { name = "name", type = "ca_name", required = true },
+]
+response = { certificate_pem = "string" }
+acl = "namespace_read"
+acl_namespace = "forge.{name}.*"
+
+[commands.ISSUE]
+syntax = "ISSUE <ca> <subject> <profile> [TTL <duration>] [SAN_DNS <name>...] [SAN_IP <ip>...]"
+description = "Issue a new certificate. Returns cert + private key (private key never stored)."
+parameters = [
+    { name = "ca", type = "ca_name", required = true },
+    { name = "subject", type = "subject", required = true },
+    { name = "profile", type = "profile", required = true },
+    { name = "ttl", type = "ttl", required = false },
+    { name = "san_dns", type = "string[]", required = false },
+    { name = "san_ip", type = "string[]", required = false },
+]
+response = { certificate_pem = "string", private_key_pem = "string", serial = "string" }
+acl = "namespace_write"
+acl_namespace = "forge.{ca}.*"
+
+[commands.ISSUE_FROM_CSR]
+syntax = "ISSUE_FROM_CSR <ca> <csr_pem> <profile> [TTL <duration>]"
+description = "Issue a certificate from a PEM-encoded CSR"
+parameters = [
+    { name = "ca", type = "ca_name", required = true },
+    { name = "csr_pem", type = "string", required = true },
+    { name = "profile", type = "profile", required = true },
+    { name = "ttl", type = "ttl", required = false },
+]
+response = { certificate_pem = "string", serial = "string" }
+acl = "namespace_write"
+acl_namespace = "forge.{ca}.*"
+
+[commands.REVOKE]
+syntax = "REVOKE <ca> <serial> [REASON <reason>]"
+description = "Revoke a certificate"
+parameters = [
+    { name = "ca", type = "ca_name", required = true },
+    { name = "serial", type = "serial", required = true },
+    { name = "reason", type = "revocation_reason", required = false },
+]
+response = { status = "string" }
+acl = "namespace_write"
+acl_namespace = "forge.{ca}.*"
+
+[commands.INSPECT]
+syntax = "INSPECT <ca> <serial>"
+description = "Get certificate details"
+parameters = [
+    { name = "ca", type = "ca_name", required = true },
+    { name = "serial", type = "serial", required = true },
+]
+response = { serial = "string", subject = "string", state = "string", certificate_pem = "string" }
+acl = "namespace_read"
+acl_namespace = "forge.{ca}.*"
+
+[commands.LIST_CERTS]
+syntax = "LIST_CERTS <ca> [STATE <state>] [LIMIT <n>] [OFFSET <n>]"
+description = "List certificates for a CA"
+parameters = [
+    { name = "ca", type = "ca_name", required = true },
+    { name = "state", type = "cert_state", required = false },
+    { name = "limit", type = "integer", required = false },
+    { name = "offset", type = "integer", required = false },
+]
+response = { count = "integer", certs = "array" }
+acl = "namespace_read"
+acl_namespace = "forge.{ca}.*"
+
+[commands.RENEW]
+syntax = "RENEW <ca> <serial> [TTL <duration>]"
+description = "Renew a certificate (re-issue with same profile and SANs)"
+parameters = [
+    { name = "ca", type = "ca_name", required = true },
+    { name = "serial", type = "serial", required = true },
+    { name = "ttl", type = "ttl", required = false },
+]
+response = { certificate_pem = "string", private_key_pem = "string", serial = "string" }
+acl = "namespace_write"
+acl_namespace = "forge.{ca}.*"
+
+# ─── HTTP Endpoints ───────────────────────────────────────────────────────────
+
+[http_endpoints]
+
+[http_endpoints.crl]
+method = "GET"
+path = "/crl/{ca}"
+description = "Get CRL for a CA (PEM-encoded)"
+content_type = "application/x-pem-file"
+
+[http_endpoints.ocsp_post]
+method = "POST"
+path = "/ocsp/{ca}"
+description = "OCSP request via POST (DER body, RFC 6960)"
+content_type = "application/ocsp-response"
+
+[http_endpoints.ocsp_get]
+method = "GET"
+path = "/ocsp/{ca}/{encoded_request}"
+description = "OCSP request via GET (base64 URL-encoded DER, RFC 6960)"
+content_type = "application/ocsp-response"
+
+[http_endpoints.health]
+method = "GET"
+path = "/health"
+description = "Health check"
+content_type = "application/json"
