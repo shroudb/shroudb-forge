@@ -595,47 +595,13 @@ fn ca_to_info(ca: &CertificateAuthority) -> CaInfoResult {
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock is before Unix epoch")
+        .unwrap_or_default()
         .as_secs()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    async fn create_test_store() -> Arc<shroudb_storage::EmbeddedStore> {
-        let dir = tempfile::tempdir().unwrap().keep();
-        let config = shroudb_storage::StorageEngineConfig {
-            data_dir: dir,
-            ..Default::default()
-        };
-        let engine = shroudb_storage::StorageEngine::open(config, &EphemeralKey)
-            .await
-            .unwrap();
-        Arc::new(shroudb_storage::EmbeddedStore::new(
-            Arc::new(engine),
-            "forge-test",
-        ))
-    }
-
-    struct EphemeralKey;
-    impl shroudb_storage::MasterKeySource for EphemeralKey {
-        fn source_name(&self) -> &str {
-            "ephemeral-test"
-        }
-        fn load<'a>(
-            &'a self,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<shroudb_crypto::SecretBytes, shroudb_storage::StorageError>,
-                    > + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async { Ok(shroudb_crypto::SecretBytes::new(vec![0x42u8; 32])) })
-        }
-    }
 
     fn test_profiles() -> Vec<CertificateProfile> {
         vec![
@@ -666,7 +632,7 @@ mod tests {
     }
 
     async fn setup() -> ForgeEngine<shroudb_storage::EmbeddedStore> {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("forge-test").await;
         ForgeEngine::new(store, test_profiles(), ForgeConfig::default())
             .await
             .unwrap()

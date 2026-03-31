@@ -11,7 +11,8 @@ use shroudb_forge_engine::ca_manager::CaCreateOpts;
 use shroudb_forge_engine::engine::{ForgeConfig, ForgeEngine};
 use shroudb_forge_engine::scheduler;
 use shroudb_storage::{
-    ChainedMasterKeySource, EnvMasterKey, FileMasterKey, MasterKeySource, StorageEngineConfig,
+    ChainedMasterKeySource, EnvMasterKey, EphemeralKey, FileMasterKey, MasterKeySource,
+    StorageEngineConfig,
 };
 
 use crate::config::load_config;
@@ -60,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     // Disable core dumps
-    disable_core_dumps();
+    shroudb_crypto::disable_core_dumps();
 
     // CLI overrides
     if let Some(ref dir) = cli.data_dir {
@@ -214,52 +215,4 @@ async fn main() -> anyhow::Result<()> {
     let _ = http_handle.await;
 
     Ok(())
-}
-
-fn disable_core_dumps() {
-    #[cfg(target_os = "linux")]
-    {
-        if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0) } != 0 {
-            tracing::warn!("failed to disable core dumps via prctl");
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let zero = libc::rlimit {
-            rlim_cur: 0,
-            rlim_max: 0,
-        };
-        if unsafe { libc::setrlimit(libc::RLIMIT_CORE, &zero) } != 0 {
-            tracing::warn!("failed to disable core dumps via setrlimit");
-        }
-    }
-}
-
-struct EphemeralKey;
-
-impl MasterKeySource for EphemeralKey {
-    fn source_name(&self) -> &str {
-        "ephemeral"
-    }
-
-    fn load<'a>(
-        &'a self,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = Result<shroudb_crypto::SecretBytes, shroudb_storage::StorageError>,
-                > + Send
-                + 'a,
-        >,
-    > {
-        Box::pin(async {
-            tracing::warn!("using ephemeral master key — data will not survive restart");
-            let key = ring::rand::SystemRandom::new();
-            let mut bytes = vec![0u8; 32];
-            ring::rand::SecureRandom::fill(&key, &mut bytes)
-                .map_err(|_| shroudb_storage::StorageError::Internal("RNG failed".into()))?;
-            Ok(shroudb_crypto::SecretBytes::new(bytes))
-        })
-    }
 }

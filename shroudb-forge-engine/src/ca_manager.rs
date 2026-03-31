@@ -254,7 +254,7 @@ impl<S: Store> CaManager<S> {
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock is before Unix epoch")
+        .unwrap_or_default()
         .as_secs()
 }
 
@@ -262,43 +262,9 @@ fn unix_now() -> u64 {
 mod tests {
     use super::*;
 
-    async fn create_test_store() -> Arc<shroudb_storage::EmbeddedStore> {
-        let dir = tempfile::tempdir().unwrap().keep();
-        let config = shroudb_storage::StorageEngineConfig {
-            data_dir: dir,
-            ..Default::default()
-        };
-        let engine = shroudb_storage::StorageEngine::open(config, &EphemeralKey)
-            .await
-            .unwrap();
-        Arc::new(shroudb_storage::EmbeddedStore::new(
-            Arc::new(engine),
-            "forge-test",
-        ))
-    }
-
-    struct EphemeralKey;
-    impl shroudb_storage::MasterKeySource for EphemeralKey {
-        fn source_name(&self) -> &str {
-            "ephemeral-test"
-        }
-        fn load<'a>(
-            &'a self,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<shroudb_crypto::SecretBytes, shroudb_storage::StorageError>,
-                    > + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async { Ok(shroudb_crypto::SecretBytes::new(vec![0x42u8; 32])) })
-        }
-    }
-
     #[tokio::test]
     async fn create_and_get_ca() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("forge-test").await;
         let mgr = CaManager::new(store);
         mgr.init().await.unwrap();
 
@@ -325,7 +291,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_duplicate_fails() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("forge-test").await;
         let mgr = CaManager::new(store);
         mgr.init().await.unwrap();
 
@@ -356,7 +322,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_cas() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("forge-test").await;
         let mgr = CaManager::new(store);
         mgr.init().await.unwrap();
 
@@ -388,7 +354,7 @@ mod tests {
 
     #[tokio::test]
     async fn persistence_survives_reload() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("forge-test").await;
 
         let mgr1 = CaManager::new(store.clone());
         mgr1.init().await.unwrap();
@@ -412,7 +378,7 @@ mod tests {
 
     #[tokio::test]
     async fn seed_if_absent() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("forge-test").await;
         let mgr = CaManager::new(store);
         mgr.init().await.unwrap();
 
@@ -443,7 +409,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_intermediate_ca() {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("forge-test").await;
         let mgr = CaManager::new(store);
         mgr.init().await.unwrap();
 

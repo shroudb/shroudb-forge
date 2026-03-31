@@ -24,6 +24,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+
+[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -691,6 +697,8 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash",
 ]
 
@@ -867,9 +875,9 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.92"
+version = "0.3.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc4c90f45aa2e6eacbe8645f77fdea542ac97a494bcd117a67df9ff4d611f995"
+checksum = "797146bb2677299a1eb6b7b50a890f4c361b29ef967addf5b2fa45dae1bb6d7d"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
@@ -1564,9 +1572,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shroudb-acl"
-version = "0.1.2"
+version = "0.1.3"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "10fff64d690badac1dc67de5c189e677f71299273872f7ea7e3bd4b1a6426ec5"
+checksum = "65e007aed8208aa3dc332e554aff39c344d783213bd6dc865ea2b2c8b9361cca"
 dependencies = [
  "serde",
  "shroudb-crypto",
@@ -1575,9 +1583,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-crypto"
-version = "0.1.0"
+version = "0.1.1"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "250f11ac5349fba63c79f83428dbd67736731c4172970863b35b319b741c9bb5"
+checksum = "45c31143de6e39049f2d5fd6b1753ce715de64df5b59239225eb1d2d9b70badb"
 dependencies = [
  "argon2",
  "base62",
@@ -1593,12 +1601,13 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tracing",
  "zeroize",
 ]
 
 [[package]]
 name = "shroudb-forge-cli"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1609,7 +1618,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-client"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1619,7 +1628,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "hex",
  "pem",
@@ -1636,7 +1645,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-engine"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "base64",
  "dashmap",
@@ -1649,7 +1658,6 @@ dependencies = [
  "shroudb-forge-core",
  "shroudb-storage",
  "shroudb-store",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1658,7 +1666,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-protocol"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1668,22 +1676,19 @@ dependencies = [
  "shroudb-forge-engine",
  "shroudb-storage",
  "shroudb-store",
- "tempfile",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "shroudb-forge-server"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "axum",
  "base64",
  "clap",
  "hex",
- "libc",
- "ring",
  "serde",
  "serde_json",
  "shroudb-acl",
@@ -1714,19 +1719,22 @@ dependencies = [
 
 [[package]]
 name = "shroudb-storage"
-version = "0.2.11"
+version = "0.2.13"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "2229d69c6bca35c1e10980236d93a2bd5e00ffc9971e7151c4b5a36c09edf7b9"
+checksum = "4c82f51793de297293a6aa0f47426deae30d12f9e804920e0adc125722be53a1"
 dependencies = [
  "crc32fast",
  "dashmap",
+ "hashbrown 0.15.5",
  "hex",
  "metrics",
  "postcard",
+ "ring",
  "serde",
  "serde_json",
  "shroudb-crypto",
  "shroudb-store",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2213,9 +2221,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.115"
+version = "0.2.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6523d69017b7633e396a89c5efab138161ed5aafcbc8d3e5c5a42ae38f50495a"
+checksum = "7dc0882f7b5bb01ae8c5215a1230832694481c1a4be062fd410e12ea3da5b631"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -2226,9 +2234,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.115"
+version = "0.2.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e3a6c758eb2f701ed3d052ff5737f5bfe6614326ea7f3bbac7156192dc32e67"
+checksum = "75973d3066e01d035dbedaad2864c398df42f8dd7b1ea057c35b8407c015b537"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -2236,9 +2244,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.115"
+version = "0.2.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "921de2737904886b52bcbb237301552d05969a6f9c40d261eb0533c8b055fedf"
+checksum = "91af5e4be765819e0bcfee7322c14374dc821e35e72fa663a830bbc7dc199eac"
 dependencies = [
  "bumpalo",
  "proc-macro2",
@@ -2249,9 +2257,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.115"
+version = "0.2.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a93e946af942b58934c604527337bad9ae33ba1d5c6900bbb41c2c07c2364a93"
+checksum = "c9bf0406a78f02f336bf1e451799cca198e8acde4ffa278f0fb20487b150a633"
 dependencies = [
  "unicode-ident",
 ]
@@ -2380,9 +2388,9 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winnow"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a90e88e4667264a994d34e6d1ab2d26d398dcdca8b7f52bec8668957517fc7d8"
+checksum = "09dac053f1cd375980747450bfc7250c264eaae0583872e845c0c7cd578872b5"
 
 [[package]]
 name = "wit-bindgen"

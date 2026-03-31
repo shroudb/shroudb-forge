@@ -285,51 +285,15 @@ pub async fn dispatch<S: Store>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::commands::parse_command;
     use shroudb_forge_engine::engine::ForgeConfig;
 
     async fn setup() -> ForgeEngine<shroudb_storage::EmbeddedStore> {
-        let store = create_test_store().await;
+        let store = shroudb_storage::test_util::create_test_store("forge-test").await;
         ForgeEngine::new(store, test_profiles(), ForgeConfig::default())
             .await
             .unwrap()
-    }
-
-    async fn create_test_store() -> Arc<shroudb_storage::EmbeddedStore> {
-        let dir = tempfile::tempdir().unwrap().keep();
-        let config = shroudb_storage::StorageEngineConfig {
-            data_dir: dir,
-            ..Default::default()
-        };
-        let engine = shroudb_storage::StorageEngine::open(config, &EphemeralKey)
-            .await
-            .unwrap();
-        Arc::new(shroudb_storage::EmbeddedStore::new(
-            Arc::new(engine),
-            "forge-test",
-        ))
-    }
-
-    struct EphemeralKey;
-    impl shroudb_storage::MasterKeySource for EphemeralKey {
-        fn source_name(&self) -> &str {
-            "ephemeral-test"
-        }
-        fn load<'a>(
-            &'a self,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<shroudb_crypto::SecretBytes, shroudb_storage::StorageError>,
-                    > + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async { Ok(shroudb_crypto::SecretBytes::new(vec![0x42u8; 32])) })
-        }
     }
 
     fn test_profiles() -> Vec<shroudb_forge_core::profile::CertificateProfile> {

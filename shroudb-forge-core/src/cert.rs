@@ -103,13 +103,14 @@ impl IssuedCertificate {
 }
 
 /// Generate a random serial number as a hex string (20 bytes = 160 bits).
-pub fn generate_serial() -> String {
+pub fn generate_serial() -> Result<String, crate::error::ForgeError> {
     let rng = ring::rand::SystemRandom::new();
     let mut buf = [0u8; 20];
-    ring::rand::SecureRandom::fill(&rng, &mut buf).expect("CSPRNG failure");
+    ring::rand::SecureRandom::fill(&rng, &mut buf)
+        .map_err(|_| crate::error::ForgeError::Internal("CSPRNG failure".into()))?;
     // Ensure the high bit is 0 (X.509 serials are positive integers).
     buf[0] &= 0x7F;
-    hex::encode(buf)
+    Ok(hex::encode(buf))
 }
 
 #[cfg(test)]
@@ -118,8 +119,8 @@ mod tests {
 
     #[test]
     fn serial_generation_is_unique() {
-        let a = generate_serial();
-        let b = generate_serial();
+        let a = generate_serial().unwrap();
+        let b = generate_serial().unwrap();
         assert_ne!(a, b);
         assert_eq!(a.len(), 40);
     }
@@ -127,7 +128,7 @@ mod tests {
     #[test]
     fn serial_high_bit_cleared() {
         for _ in 0..100 {
-            let serial = generate_serial();
+            let serial = generate_serial().unwrap();
             let first_byte = u8::from_str_radix(&serial[..2], 16).unwrap();
             assert!(first_byte & 0x80 == 0, "high bit must be 0");
         }

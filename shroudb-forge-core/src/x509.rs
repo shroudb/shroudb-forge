@@ -50,7 +50,7 @@ pub fn generate_ca_certificate(
         KeyUsagePurpose::DigitalSignature,
     ];
 
-    let serial = generate_serial();
+    let serial = generate_serial()?;
     let serial_bytes =
         hex::decode(&serial).map_err(|e| ForgeError::X509Generation(e.to_string()))?;
     params.serial_number = Some(rcgen::SerialNumber::from_slice(&serial_bytes));
@@ -95,7 +95,7 @@ pub fn generate_intermediate_ca_certificate(
         KeyUsagePurpose::DigitalSignature,
     ];
 
-    let serial = generate_serial();
+    let serial = generate_serial()?;
     let serial_bytes =
         hex::decode(&serial).map_err(|e| ForgeError::X509Generation(e.to_string()))?;
     params.serial_number = Some(rcgen::SerialNumber::from_slice(&serial_bytes));
@@ -222,7 +222,7 @@ pub fn issue_certificate(params: &IssueCertParams<'_>) -> Result<IssuedCertResul
     cert_params.subject_alt_names = sans;
 
     // Serial number
-    let serial = generate_serial();
+    let serial = generate_serial()?;
     let serial_bytes =
         hex::decode(&serial).map_err(|e| ForgeError::X509Generation(e.to_string()))?;
     cert_params.serial_number = Some(rcgen::SerialNumber::from_slice(&serial_bytes));
@@ -278,7 +278,7 @@ pub fn issue_from_csr(
         .signed_by(&ca_cert, &ca_key_pair)
         .map_err(|e| ForgeError::X509Generation(format!("CSR signing failed: {e}")))?;
 
-    let serial = generate_serial();
+    let serial = generate_serial()?;
 
     Ok(IssuedCertResult {
         certificate_pem: cert.pem(),

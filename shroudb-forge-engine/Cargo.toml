@@ -24,5 +24,4 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
-shroudb-storage = { workspace = true }
-tempfile = "3"
+shroudb-storage = { workspace = true, features = ["testing"] }

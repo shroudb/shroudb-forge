@@ -120,6 +120,6 @@ async fn run_cycle<S: Store>(engine: &ForgeEngine<S>) -> Result<(), String> {
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock is before Unix epoch")
+        .unwrap_or_default()
         .as_secs()
 }

@@ -19,7 +19,6 @@ shroudb-store = { workspace = true }
 shroudb-storage = { workspace = true }
 shroudb-crypto = { workspace = true }
 shroudb-protocol-wire = { workspace = true }
-ring = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -31,7 +30,6 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 base64 = { workspace = true }
 hex = { workspace = true }
-libc = { workspace = true }
 
 [dev-dependencies]
 shroudb-forge-client = { workspace = true }
