@@ -10,6 +10,7 @@ publish.workspace = true
 shroudb-forge-core = { workspace = true }
 shroudb-store = { workspace = true }
 shroudb-crypto = { workspace = true }
+shroudb-acl = { workspace = true }
 ring = { workspace = true }
 rcgen = { workspace = true }
 tokio = { workspace = true }

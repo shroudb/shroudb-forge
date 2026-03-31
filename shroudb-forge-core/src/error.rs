@@ -63,4 +63,11 @@ pub enum ForgeError {
 
     #[error("internal error: {0}")]
     Internal(String),
+
+    #[error("policy denied: {action} on {resource} (policy: {policy})")]
+    PolicyDenied {
+        action: String,
+        resource: String,
+        policy: String,
+    },
 }

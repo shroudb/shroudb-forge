@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use shroudb_acl::{PolicyEffect, PolicyEvaluator, PolicyPrincipal, PolicyRequest, PolicyResource};
 use shroudb_forge_core::ca::{CaAlgorithm, CertificateAuthority, decode_key_material};
 use shroudb_forge_core::cert::{CertState, IssuedCertificate, RevocationReason};
 use shroudb_forge_core::crl;
@@ -98,6 +99,7 @@ pub struct ForgeEngine<S: Store> {
     pub(crate) certs: CertManager<S>,
     pub(crate) profiles: Vec<CertificateProfile>,
     pub(crate) config: ForgeConfig,
+    policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
 }
 
 impl<S: Store> ForgeEngine<S> {
@@ -105,6 +107,7 @@ impl<S: Store> ForgeEngine<S> {
         store: Arc<S>,
         profiles: Vec<CertificateProfile>,
         config: ForgeConfig,
+        policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
     ) -> Result<Self, ForgeError> {
         let cas = CaManager::new(store.clone());
         cas.init().await?;
@@ -121,7 +124,39 @@ impl<S: Store> ForgeEngine<S> {
             certs,
             profiles,
             config,
+            policy_evaluator,
         })
+    }
+
+    async fn check_policy(&self, resource_id: &str, action: &str) -> Result<(), ForgeError> {
+        let Some(evaluator) = &self.policy_evaluator else {
+            return Ok(());
+        };
+        let request = PolicyRequest {
+            principal: PolicyPrincipal {
+                id: String::new(),
+                roles: vec![],
+                claims: Default::default(),
+            },
+            resource: PolicyResource {
+                id: resource_id.to_string(),
+                resource_type: "ca".to_string(),
+                attributes: Default::default(),
+            },
+            action: action.to_string(),
+        };
+        let decision = evaluator
+            .evaluate(&request)
+            .await
+            .map_err(|e| ForgeError::Internal(format!("policy evaluation: {e}")))?;
+        if decision.effect == PolicyEffect::Deny {
+            return Err(ForgeError::PolicyDenied {
+                action: action.to_string(),
+                resource: resource_id.to_string(),
+                policy: decision.matched_policy.unwrap_or_default(),
+            });
+        }
+        Ok(())
     }
 
     pub fn ca_manager(&self) -> &CaManager<S> {
@@ -144,6 +179,7 @@ impl<S: Store> ForgeEngine<S> {
         algorithm: CaAlgorithm,
         opts: CaCreateOpts,
     ) -> Result<CaInfoResult, ForgeError> {
+        self.check_policy(name, "ca_create").await?;
         let ca = self.cas.create(name, algorithm, opts).await?;
         // Initialize cert namespace for the new CA
         self.certs.init_for_ca(name).await?;
@@ -165,6 +201,7 @@ impl<S: Store> ForgeEngine<S> {
         force: bool,
         dryrun: bool,
     ) -> Result<RotateResult, ForgeError> {
+        self.check_policy(name, "ca_rotate").await?;
         let ca = self.cas.get(name)?;
 
         if ca.disabled {
@@ -258,6 +295,7 @@ impl<S: Store> ForgeEngine<S> {
         san_dns: &[String],
         san_ip: &[String],
     ) -> Result<IssueResult, ForgeError> {
+        self.check_policy(ca_name, "issue").await?;
         let ca = self.cas.get(ca_name)?;
         if ca.disabled {
             return Err(ForgeError::CaDisabled {
@@ -351,6 +389,7 @@ impl<S: Store> ForgeEngine<S> {
         profile_name: &str,
         ttl: Option<&str>,
     ) -> Result<IssueResult, ForgeError> {
+        self.check_policy(ca_name, "issue").await?;
         let ca = self.cas.get(ca_name)?;
         if ca.disabled {
             return Err(ForgeError::CaDisabled {
@@ -441,6 +480,7 @@ impl<S: Store> ForgeEngine<S> {
         serial: &str,
         reason: Option<RevocationReason>,
     ) -> Result<(), ForgeError> {
+        self.check_policy(ca_name, "revoke").await?;
         let cert = self
             .certs
             .get(ca_name, serial)
@@ -520,6 +560,7 @@ impl<S: Store> ForgeEngine<S> {
         serial: &str,
         ttl: Option<&str>,
     ) -> Result<IssueResult, ForgeError> {
+        self.check_policy(ca_name, "renew").await?;
         let cert = self
             .certs
             .get(ca_name, serial)
@@ -547,6 +588,7 @@ impl<S: Store> ForgeEngine<S> {
 
     /// Regenerate the CRL for a CA.
     pub async fn regenerate_crl(&self, ca_name: &str) -> Result<(), ForgeError> {
+        self.check_policy(ca_name, "regenerate_crl").await?;
         let ca = self.cas.get(ca_name)?;
         let active = ca.active_key().ok_or_else(|| ForgeError::NoActiveKey {
             ca: ca_name.to_string(),
@@ -633,7 +675,7 @@ mod tests {
 
     async fn setup() -> ForgeEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("forge-test").await;
-        ForgeEngine::new(store, test_profiles(), ForgeConfig::default())
+        ForgeEngine::new(store, test_profiles(), ForgeConfig::default(), None)
             .await
             .unwrap()
     }
