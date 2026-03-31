@@ -282,6 +282,65 @@ async fn tcp_ca_rotate() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// TCP: Edge cases
+// ═══════════════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn test_max_ttl_rejected() {
+    let server = TestServer::start().await.expect("server failed to start");
+    let mut client = shroudb_forge_client::ForgeClient::connect(&server.tcp_addr)
+        .await
+        .expect("connect failed");
+
+    client
+        .ca_create("internal", "ecdsa-p256", "CN=Internal CA", None, None)
+        .await
+        .unwrap();
+
+    // Default server profile has max_ttl_days=90. Request 365 days.
+    let err = client
+        .issue("internal", "CN=svc", "server", Some("365d"), &[], &[])
+        .await;
+    assert!(err.is_err(), "TTL exceeding profile max should be rejected");
+}
+
+#[tokio::test]
+async fn test_empty_subject_rejected() {
+    let server = TestServer::start().await.expect("server failed to start");
+    let mut client = shroudb_forge_client::ForgeClient::connect(&server.tcp_addr)
+        .await
+        .expect("connect failed");
+
+    client
+        .ca_create("internal", "ecdsa-p256", "CN=Internal CA", None, None)
+        .await
+        .unwrap();
+
+    // Empty subject produces a certificate with an empty DN — verify it
+    // does not panic or corrupt state. The issued cert should still be
+    // inspectable and the CA should remain operational.
+    let issued = client.issue("internal", "", "server", None, &[], &[]).await;
+    match issued {
+        Err(_) => {} // rejected — acceptable
+        Ok(cert) => {
+            // If it was accepted, verify the CA is still functional and
+            // the cert is inspectable
+            let info = client
+                .inspect("internal", &cert.serial)
+                .await
+                .expect("inspect after empty subject should work");
+            assert_eq!(info["state"], "active");
+
+            // CA still works for normal issuance
+            client
+                .issue("internal", "CN=normal", "server", None, &[], &[])
+                .await
+                .expect("normal issuance after empty subject should work");
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // ACL: Token-based auth
 // ═══════════════════════════════════════════════════════════════════════
 
