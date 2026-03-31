@@ -151,12 +151,15 @@ async fn main() -> anyhow::Result<()> {
             .with_context(|| format!("failed to init certs for CA '{name}'"))?;
     }
 
-    // Start scheduler
-    let _scheduler_handle =
-        scheduler::start_scheduler(engine.clone(), cfg.engine.scheduler_interval_secs);
-
     // Shutdown signal
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    // Start scheduler
+    let _scheduler_handle = scheduler::start_scheduler(
+        engine.clone(),
+        cfg.engine.scheduler_interval_secs,
+        shutdown_rx.clone(),
+    );
 
     // Auth
     let token_validator = config::build_token_validator(&cfg.auth);

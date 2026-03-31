@@ -128,13 +128,18 @@ impl<S: Store> ForgeEngine<S> {
         })
     }
 
-    async fn check_policy(&self, resource_id: &str, action: &str) -> Result<(), ForgeError> {
+    async fn check_policy(
+        &self,
+        resource_id: &str,
+        action: &str,
+        actor: Option<&str>,
+    ) -> Result<(), ForgeError> {
         let Some(evaluator) = &self.policy_evaluator else {
             return Ok(());
         };
         let request = PolicyRequest {
             principal: PolicyPrincipal {
-                id: String::new(),
+                id: actor.unwrap_or("").to_string(),
                 roles: vec![],
                 claims: Default::default(),
             },
@@ -178,8 +183,9 @@ impl<S: Store> ForgeEngine<S> {
         name: &str,
         algorithm: CaAlgorithm,
         opts: CaCreateOpts,
+        actor: Option<&str>,
     ) -> Result<CaInfoResult, ForgeError> {
-        self.check_policy(name, "ca_create").await?;
+        self.check_policy(name, "ca_create", actor).await?;
         let ca = self.cas.create(name, algorithm, opts).await?;
         // Initialize cert namespace for the new CA
         self.certs.init_for_ca(name).await?;
@@ -200,8 +206,9 @@ impl<S: Store> ForgeEngine<S> {
         name: &str,
         force: bool,
         dryrun: bool,
+        actor: Option<&str>,
     ) -> Result<RotateResult, ForgeError> {
-        self.check_policy(name, "ca_rotate").await?;
+        self.check_policy(name, "ca_rotate", actor).await?;
         let ca = self.cas.get(name)?;
 
         if ca.disabled {
@@ -286,6 +293,7 @@ impl<S: Store> ForgeEngine<S> {
 
     // ── Certificate operations ──────────────────────────────────────
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn issue(
         &self,
         ca_name: &str,
@@ -294,8 +302,9 @@ impl<S: Store> ForgeEngine<S> {
         ttl: Option<&str>,
         san_dns: &[String],
         san_ip: &[String],
+        actor: Option<&str>,
     ) -> Result<IssueResult, ForgeError> {
-        self.check_policy(ca_name, "issue").await?;
+        self.check_policy(ca_name, "issue", actor).await?;
         let ca = self.cas.get(ca_name)?;
         if ca.disabled {
             return Err(ForgeError::CaDisabled {
@@ -388,8 +397,9 @@ impl<S: Store> ForgeEngine<S> {
         csr_pem: &str,
         profile_name: &str,
         ttl: Option<&str>,
+        actor: Option<&str>,
     ) -> Result<IssueResult, ForgeError> {
-        self.check_policy(ca_name, "issue").await?;
+        self.check_policy(ca_name, "issue", actor).await?;
         let ca = self.cas.get(ca_name)?;
         if ca.disabled {
             return Err(ForgeError::CaDisabled {
@@ -479,8 +489,9 @@ impl<S: Store> ForgeEngine<S> {
         ca_name: &str,
         serial: &str,
         reason: Option<RevocationReason>,
+        actor: Option<&str>,
     ) -> Result<(), ForgeError> {
-        self.check_policy(ca_name, "revoke").await?;
+        self.check_policy(ca_name, "revoke", actor).await?;
         let cert = self
             .certs
             .get(ca_name, serial)
@@ -505,7 +516,7 @@ impl<S: Store> ForgeEngine<S> {
             .await?;
 
         // Regenerate CRL
-        self.regenerate_crl(ca_name).await?;
+        self.regenerate_crl(ca_name, actor).await?;
 
         tracing::info!(ca = ca_name, serial, "certificate revoked");
         Ok(())
@@ -559,8 +570,9 @@ impl<S: Store> ForgeEngine<S> {
         ca_name: &str,
         serial: &str,
         ttl: Option<&str>,
+        actor: Option<&str>,
     ) -> Result<IssueResult, ForgeError> {
-        self.check_policy(ca_name, "renew").await?;
+        self.check_policy(ca_name, "renew", actor).await?;
         let cert = self
             .certs
             .get(ca_name, serial)
@@ -582,13 +594,18 @@ impl<S: Store> ForgeEngine<S> {
             ttl,
             &cert.san_dns,
             &cert.san_ip,
+            actor,
         )
         .await
     }
 
     /// Regenerate the CRL for a CA.
-    pub async fn regenerate_crl(&self, ca_name: &str) -> Result<(), ForgeError> {
-        self.check_policy(ca_name, "regenerate_crl").await?;
+    pub async fn regenerate_crl(
+        &self,
+        ca_name: &str,
+        actor: Option<&str>,
+    ) -> Result<(), ForgeError> {
+        self.check_policy(ca_name, "regenerate_crl", actor).await?;
         let ca = self.cas.get(ca_name)?;
         let active = ca.active_key().ok_or_else(|| ForgeError::NoActiveKey {
             ca: ca_name.to_string(),
@@ -692,6 +709,7 @@ mod tests {
                     subject: "CN=Internal CA,O=Test".into(),
                     ..Default::default()
                 },
+                None,
             )
             .await
             .unwrap();
@@ -716,6 +734,7 @@ mod tests {
                     subject: "CN=A".into(),
                     ..Default::default()
                 },
+                None,
             )
             .await
             .unwrap();
@@ -727,6 +746,7 @@ mod tests {
                     subject: "CN=B".into(),
                     ..Default::default()
                 },
+                None,
             )
             .await
             .unwrap();
@@ -748,6 +768,7 @@ mod tests {
                     subject: "CN=Internal CA".into(),
                     ..Default::default()
                 },
+                None,
             )
             .await
             .unwrap();
@@ -760,6 +781,7 @@ mod tests {
                 Some("24h"),
                 &["myservice.local".into()],
                 &[],
+                None,
             )
             .await
             .unwrap();
@@ -794,12 +816,13 @@ mod tests {
                     subject: "CN=Internal CA".into(),
                     ..Default::default()
                 },
+                None,
             )
             .await
             .unwrap();
 
         let issued = engine
-            .issue("internal", "CN=svc", "server", None, &[], &[])
+            .issue("internal", "CN=svc", "server", None, &[], &[], None)
             .await
             .unwrap();
 
@@ -808,6 +831,7 @@ mod tests {
                 "internal",
                 &issued.serial,
                 Some(RevocationReason::Superseded),
+                None,
             )
             .await
             .unwrap();
@@ -828,11 +852,15 @@ mod tests {
                     subject: "CN=Internal CA".into(),
                     ..Default::default()
                 },
+                None,
             )
             .await
             .unwrap();
 
-        let result = engine.ca_rotate("internal", true, false).await.unwrap();
+        let result = engine
+            .ca_rotate("internal", true, false, None)
+            .await
+            .unwrap();
         assert!(result.rotated);
         assert_eq!(result.key_version, 2);
         assert_eq!(result.previous_version, Some(1));
@@ -856,6 +884,7 @@ mod tests {
                     subject: "CN=Internal CA".into(),
                     ..Default::default()
                 },
+                None,
             )
             .await
             .unwrap();
@@ -876,16 +905,17 @@ mod tests {
                     subject: "CN=Internal CA".into(),
                     ..Default::default()
                 },
+                None,
             )
             .await
             .unwrap();
 
         engine
-            .issue("internal", "CN=svc1", "server", None, &[], &[])
+            .issue("internal", "CN=svc1", "server", None, &[], &[], None)
             .await
             .unwrap();
         engine
-            .issue("internal", "CN=svc2", "server", None, &[], &[])
+            .issue("internal", "CN=svc2", "server", None, &[], &[], None)
             .await
             .unwrap();
 
@@ -905,6 +935,7 @@ mod tests {
                     subject: "CN=Internal CA".into(),
                     ..Default::default()
                 },
+                None,
             )
             .await
             .unwrap();
@@ -918,6 +949,7 @@ mod tests {
                 None,
                 &["svc.local".into()],
                 &[],
+                None,
             )
             .await
             .unwrap_err();
@@ -925,7 +957,7 @@ mod tests {
 
         // Unknown profile
         let err = engine
-            .issue("internal", "CN=svc", "nonexistent", None, &[], &[])
+            .issue("internal", "CN=svc", "nonexistent", None, &[], &[], None)
             .await
             .unwrap_err();
         assert!(matches!(err, ForgeError::ProfileNotFound { .. }));

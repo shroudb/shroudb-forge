@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use shroudb_forge_core::ca::decode_key_material;
 use shroudb_forge_core::key_state::KeyState;
 use shroudb_store::Store;
+use tokio::sync::watch;
 
 use crate::engine::ForgeEngine;
 
@@ -13,15 +14,20 @@ use crate::engine::ForgeEngine;
 pub fn start_scheduler<S: Store + 'static>(
     engine: Arc<ForgeEngine<S>>,
     interval_secs: u64,
+    mut shutdown: watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
-        interval.tick().await; // skip first immediate tick
-
         loop {
-            interval.tick().await;
-            if let Err(e) = run_cycle(&engine).await {
-                tracing::warn!(error = %e, "scheduler cycle failed");
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
+                    if let Err(e) = run_cycle(&engine).await {
+                        tracing::warn!(error = %e, "scheduler cycle failed");
+                    }
+                }
+                _ = shutdown.changed() => {
+                    tracing::info!("forge scheduler shutting down");
+                    break;
+                }
             }
         }
     })
@@ -52,7 +58,7 @@ async fn run_cycle<S: Store>(engine: &ForgeEngine<S>) -> Result<(), String> {
                 .unwrap_or(0);
 
             if age_days >= ca.rotation_days as u64 {
-                match engine.ca_rotate(&name, true, false).await {
+                match engine.ca_rotate(&name, true, false, None).await {
                     Ok(result) => {
                         tracing::info!(
                             ca = name,
@@ -108,7 +114,7 @@ async fn run_cycle<S: Store>(engine: &ForgeEngine<S>) -> Result<(), String> {
         // Regenerate CRL for CAs with active keys
         if let Some(active) = ca.active_key()
             && decode_key_material(active).is_ok()
-            && let Err(e) = engine.regenerate_crl(&name).await
+            && let Err(e) = engine.regenerate_crl(&name, None).await
         {
             tracing::warn!(ca = name, error = %e, "CRL regeneration failed");
         }

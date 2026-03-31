@@ -44,6 +44,8 @@ pub async fn dispatch<S: Store>(
         return ForgeResponse::error(format!("access denied: {e}"));
     }
 
+    let actor = auth_context.map(|c| c.actor.as_str());
+
     match cmd {
         ForgeCommand::Auth { .. } => ForgeResponse::error("AUTH handled at connection layer"),
 
@@ -67,7 +69,7 @@ pub async fn dispatch<S: Store>(
             if let Some(days) = ttl_days {
                 opts.ttl_days = days;
             }
-            match engine.ca_create(&name, algo, opts).await {
+            match engine.ca_create(&name, algo, opts, actor).await {
                 Ok(info) => ForgeResponse::ok(serde_json::json!({
                     "status": "ok",
                     "ca": info.name,
@@ -111,7 +113,7 @@ pub async fn dispatch<S: Store>(
         }
 
         ForgeCommand::CaRotate { ca, force, dryrun } => {
-            match engine.ca_rotate(&ca, force, dryrun).await {
+            match engine.ca_rotate(&ca, force, dryrun, actor).await {
                 Ok(result) => ForgeResponse::ok(serde_json::json!({
                     "status": "ok",
                     "rotated": result.rotated,
@@ -140,7 +142,15 @@ pub async fn dispatch<S: Store>(
             san_ip,
         } => {
             match engine
-                .issue(&ca, &subject, &profile, ttl.as_deref(), &san_dns, &san_ip)
+                .issue(
+                    &ca,
+                    &subject,
+                    &profile,
+                    ttl.as_deref(),
+                    &san_dns,
+                    &san_ip,
+                    actor,
+                )
                 .await
             {
                 Ok(result) => ForgeResponse::ok(serde_json::json!({
@@ -162,7 +172,7 @@ pub async fn dispatch<S: Store>(
             profile,
             ttl,
         } => match engine
-            .issue_from_csr(&ca, &csr_pem, &profile, ttl.as_deref())
+            .issue_from_csr(&ca, &csr_pem, &profile, ttl.as_deref(), actor)
             .await
         {
             Ok(result) => ForgeResponse::ok(serde_json::json!({
@@ -187,7 +197,7 @@ pub async fn dispatch<S: Store>(
                 None
             };
 
-            match engine.revoke(&ca, &serial, revocation_reason).await {
+            match engine.revoke(&ca, &serial, revocation_reason, actor).await {
                 Ok(()) => ForgeResponse::ok(serde_json::json!({
                     "status": "ok",
                     "ca": ca,
@@ -255,7 +265,7 @@ pub async fn dispatch<S: Store>(
         }
 
         ForgeCommand::Renew { ca, serial, ttl } => {
-            match engine.renew(&ca, &serial, ttl.as_deref()).await {
+            match engine.renew(&ca, &serial, ttl.as_deref(), actor).await {
                 Ok(result) => ForgeResponse::ok(serde_json::json!({
                     "status": "ok",
                     "certificate_pem": result.certificate_pem,
