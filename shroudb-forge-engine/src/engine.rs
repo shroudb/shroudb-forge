@@ -568,8 +568,18 @@ impl<S: Store> ForgeEngine<S> {
             })
             .await?;
 
-        // Regenerate CRL
-        self.regenerate_crl(ca_name, actor).await?;
+        // Regenerate CRL — best-effort. If CRL generation fails, the cert
+        // is still revoked in the Store. The scheduler will regenerate the
+        // CRL on its next cycle. We don't want CRL generation failure to
+        // block revocation.
+        if let Err(e) = self.regenerate_crl(ca_name, actor).await {
+            tracing::warn!(
+                ca = ca_name,
+                serial,
+                error = %e,
+                "CRL regeneration failed after revocation — scheduler will retry"
+            );
+        }
 
         let resource = format!("{ca_name}/{serial}");
         self.emit_audit_event("REVOKE", &resource, EventResult::Ok, actor, start)
