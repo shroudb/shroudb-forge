@@ -11,6 +11,7 @@ shroudb-forge-core = { workspace = true }
 shroudb-store = { workspace = true }
 shroudb-crypto = { workspace = true }
 shroudb-acl = { workspace = true }
+shroudb-chronicle-core = { workspace = true }
 ring = { workspace = true }
 rcgen = { workspace = true }
 tokio = { workspace = true }

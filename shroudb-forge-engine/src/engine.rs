@@ -1,7 +1,9 @@
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use shroudb_acl::{PolicyEffect, PolicyEvaluator, PolicyPrincipal, PolicyRequest, PolicyResource};
+use shroudb_chronicle_core::event::{Engine as AuditEngine, Event, EventResult};
+use shroudb_chronicle_core::ops::ChronicleOps;
 use shroudb_forge_core::ca::{CaAlgorithm, CertificateAuthority, decode_key_material};
 use shroudb_forge_core::cert::{CertState, IssuedCertificate, RevocationReason};
 use shroudb_forge_core::crl;
@@ -100,6 +102,7 @@ pub struct ForgeEngine<S: Store> {
     pub(crate) profiles: Vec<CertificateProfile>,
     pub(crate) config: ForgeConfig,
     policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
+    chronicle: Option<Arc<dyn ChronicleOps>>,
 }
 
 impl<S: Store> ForgeEngine<S> {
@@ -108,6 +111,7 @@ impl<S: Store> ForgeEngine<S> {
         profiles: Vec<CertificateProfile>,
         config: ForgeConfig,
         policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
+        chronicle: Option<Arc<dyn ChronicleOps>>,
     ) -> Result<Self, ForgeError> {
         let cas = CaManager::new(store.clone());
         cas.init().await?;
@@ -125,7 +129,34 @@ impl<S: Store> ForgeEngine<S> {
             profiles,
             config,
             policy_evaluator,
+            chronicle,
         })
+    }
+
+    /// Emit an audit event to Chronicle. Warn-only on failure — Forge is
+    /// infrastructure and must not fail because auditing is unavailable.
+    async fn emit_audit_event(
+        &self,
+        operation: &str,
+        resource: &str,
+        result: EventResult,
+        actor: Option<&str>,
+        start: Instant,
+    ) {
+        let Some(chronicle) = &self.chronicle else {
+            return;
+        };
+        let mut event = Event::new(
+            AuditEngine::Forge,
+            operation.to_string(),
+            resource.to_string(),
+            result,
+            actor.unwrap_or("anonymous").to_string(),
+        );
+        event.duration_ms = start.elapsed().as_millis() as u64;
+        if let Err(e) = chronicle.record(event).await {
+            tracing::warn!(operation, resource, error = %e, "failed to emit audit event");
+        }
     }
 
     async fn check_policy(
@@ -181,6 +212,7 @@ impl<S: Store> ForgeEngine<S> {
         mut opts: CaCreateOpts,
         actor: Option<&str>,
     ) -> Result<CaInfoResult, ForgeError> {
+        let start = Instant::now();
         self.check_policy(name, "ca_create", actor).await?;
         // Apply config defaults for fields still at their placeholder values
         let defaults = CaCreateOpts::default();
@@ -196,6 +228,8 @@ impl<S: Store> ForgeEngine<S> {
         let ca = self.cas.create(name, algorithm, opts).await?;
         // Initialize cert namespace for the new CA
         self.certs.init_for_ca(name).await?;
+        self.emit_audit_event("CA_CREATE", name, EventResult::Ok, actor, start)
+            .await;
         Ok(ca_to_info(&ca))
     }
 
@@ -215,6 +249,7 @@ impl<S: Store> ForgeEngine<S> {
         dryrun: bool,
         actor: Option<&str>,
     ) -> Result<RotateResult, ForgeError> {
+        let start = Instant::now();
         self.check_policy(name, "ca_rotate", actor).await?;
         let ca = self.cas.get(name)?;
 
@@ -283,6 +318,8 @@ impl<S: Store> ForgeEngine<S> {
 
         tracing::info!(ca = name, new_version, previous_version, "CA key rotated");
 
+        self.emit_audit_event("CA_ROTATE", name, EventResult::Ok, actor, start)
+            .await;
         Ok(RotateResult {
             key_version: new_version,
             previous_version: Some(previous_version),
@@ -311,6 +348,7 @@ impl<S: Store> ForgeEngine<S> {
         san_ip: &[String],
         actor: Option<&str>,
     ) -> Result<IssueResult, ForgeError> {
+        let start = Instant::now();
         self.check_policy(ca_name, "issue", actor).await?;
         let ca = self.cas.get(ca_name)?;
         if ca.disabled {
@@ -388,6 +426,9 @@ impl<S: Store> ForgeEngine<S> {
 
         self.certs.store_cert(cert_meta).await?;
 
+        let resource = format!("{ca_name}/{}", issued.serial);
+        self.emit_audit_event("ISSUE", &resource, EventResult::Ok, actor, start)
+            .await;
         Ok(IssueResult {
             certificate_pem: issued.certificate_pem,
             private_key_pem: issued.private_key_pem,
@@ -406,6 +447,7 @@ impl<S: Store> ForgeEngine<S> {
         ttl: Option<&str>,
         actor: Option<&str>,
     ) -> Result<IssueResult, ForgeError> {
+        let start = Instant::now();
         self.check_policy(ca_name, "issue", actor).await?;
         let ca = self.cas.get(ca_name)?;
         if ca.disabled {
@@ -481,6 +523,9 @@ impl<S: Store> ForgeEngine<S> {
 
         self.certs.store_cert(cert_meta).await?;
 
+        let resource = format!("{ca_name}/{}", issued.serial);
+        self.emit_audit_event("ISSUE_FROM_CSR", &resource, EventResult::Ok, actor, start)
+            .await;
         Ok(IssueResult {
             certificate_pem: issued.certificate_pem,
             private_key_pem: issued.private_key_pem,
@@ -498,6 +543,7 @@ impl<S: Store> ForgeEngine<S> {
         reason: Option<RevocationReason>,
         actor: Option<&str>,
     ) -> Result<(), ForgeError> {
+        let start = Instant::now();
         self.check_policy(ca_name, "revoke", actor).await?;
         let cert = self
             .certs
@@ -525,6 +571,9 @@ impl<S: Store> ForgeEngine<S> {
         // Regenerate CRL
         self.regenerate_crl(ca_name, actor).await?;
 
+        let resource = format!("{ca_name}/{serial}");
+        self.emit_audit_event("REVOKE", &resource, EventResult::Ok, actor, start)
+            .await;
         tracing::info!(ca = ca_name, serial, "certificate revoked");
         Ok(())
     }
@@ -612,6 +661,7 @@ impl<S: Store> ForgeEngine<S> {
         ca_name: &str,
         actor: Option<&str>,
     ) -> Result<(), ForgeError> {
+        let start = Instant::now();
         self.check_policy(ca_name, "regenerate_crl", actor).await?;
         let ca = self.cas.get(ca_name)?;
         let active = ca.active_key().ok_or_else(|| ForgeError::NoActiveKey {
@@ -625,6 +675,8 @@ impl<S: Store> ForgeEngine<S> {
             crl::generate_crl_pem(key_der.as_bytes(), &ca.subject, ca.algorithm, &revoked)?;
 
         self.certs.set_crl_pem(ca_name, crl_pem);
+        self.emit_audit_event("REGENERATE_CRL", ca_name, EventResult::Ok, actor, start)
+            .await;
         Ok(())
     }
 }
@@ -699,7 +751,7 @@ mod tests {
 
     async fn setup() -> ForgeEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("forge-test").await;
-        ForgeEngine::new(store, test_profiles(), ForgeConfig::default(), None)
+        ForgeEngine::new(store, test_profiles(), ForgeConfig::default(), None, None)
             .await
             .unwrap()
     }
