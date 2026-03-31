@@ -148,6 +148,126 @@ mod tests {
     }
 
     #[test]
+    fn revocation_reason_all_variants() {
+        assert_eq!(
+            RevocationReason::from_arg("unspecified"),
+            Some(RevocationReason::Unspecified)
+        );
+        assert_eq!(
+            RevocationReason::from_arg("keycompromise"),
+            Some(RevocationReason::KeyCompromise)
+        );
+        assert_eq!(
+            RevocationReason::from_arg("ca_compromise"),
+            Some(RevocationReason::CaCompromise)
+        );
+        assert_eq!(
+            RevocationReason::from_arg("cacompromise"),
+            Some(RevocationReason::CaCompromise)
+        );
+        assert_eq!(
+            RevocationReason::from_arg("affiliation_changed"),
+            Some(RevocationReason::AffiliationChanged)
+        );
+        assert_eq!(
+            RevocationReason::from_arg("affiliationchanged"),
+            Some(RevocationReason::AffiliationChanged)
+        );
+        assert_eq!(
+            RevocationReason::from_arg("cessation_of_operation"),
+            Some(RevocationReason::CessationOfOperation)
+        );
+        assert_eq!(
+            RevocationReason::from_arg("cessation"),
+            Some(RevocationReason::CessationOfOperation)
+        );
+    }
+
+    #[test]
+    fn revocation_reason_display() {
+        assert_eq!(format!("{}", RevocationReason::Unspecified), "unspecified");
+        assert_eq!(
+            format!("{}", RevocationReason::KeyCompromise),
+            "key_compromise"
+        );
+        assert_eq!(
+            format!("{}", RevocationReason::CaCompromise),
+            "ca_compromise"
+        );
+        assert_eq!(
+            format!("{}", RevocationReason::AffiliationChanged),
+            "affiliation_changed"
+        );
+        assert_eq!(format!("{}", RevocationReason::Superseded), "superseded");
+        assert_eq!(
+            format!("{}", RevocationReason::CessationOfOperation),
+            "cessation_of_operation"
+        );
+    }
+
+    #[test]
+    fn cert_state_from_arg() {
+        assert_eq!(CertState::from_arg("active"), Some(CertState::Active));
+        assert_eq!(CertState::from_arg("ACTIVE"), Some(CertState::Active));
+        assert_eq!(CertState::from_arg("revoked"), Some(CertState::Revoked));
+        assert_eq!(CertState::from_arg("REVOKED"), Some(CertState::Revoked));
+        assert_eq!(CertState::from_arg("unknown"), None);
+        assert_eq!(CertState::from_arg(""), None);
+    }
+
+    #[test]
+    fn cert_state_display() {
+        assert_eq!(format!("{}", CertState::Active), "active");
+        assert_eq!(format!("{}", CertState::Revoked), "revoked");
+    }
+
+    #[test]
+    fn issued_cert_revoked_state() {
+        let cert = IssuedCertificate {
+            serial: "02".into(),
+            ca_name: "test".into(),
+            ca_key_version: 1,
+            subject: "CN=test".into(),
+            profile: "server".into(),
+            state: CertState::Revoked,
+            not_before: 1000,
+            not_after: 2000,
+            san_dns: vec![],
+            san_ip: vec![],
+            issued_at: 1000,
+            revoked_at: Some(1500),
+            revocation_reason: Some(RevocationReason::KeyCompromise),
+            certificate_pem: String::new(),
+        };
+        // Revoked certs show "revoked" regardless of expiry
+        assert_eq!(cert.effective_state(1500), "revoked");
+        assert_eq!(cert.effective_state(3000), "revoked");
+    }
+
+    #[test]
+    fn is_expired() {
+        let cert = IssuedCertificate {
+            serial: "03".into(),
+            ca_name: "test".into(),
+            ca_key_version: 1,
+            subject: "CN=test".into(),
+            profile: "server".into(),
+            state: CertState::Active,
+            not_before: 1000,
+            not_after: 2000,
+            san_dns: vec![],
+            san_ip: vec![],
+            issued_at: 1000,
+            revoked_at: None,
+            revocation_reason: None,
+            certificate_pem: String::new(),
+        };
+        assert!(!cert.is_expired(1500));
+        assert!(!cert.is_expired(2000)); // at boundary: not expired (now == not_after)
+        assert!(cert.is_expired(2001));
+    }
+
+    #[test]
     fn effective_state() {
         let cert = IssuedCertificate {
             serial: "01".into(),

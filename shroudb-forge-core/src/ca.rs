@@ -134,3 +134,253 @@ pub fn decode_key_material(kv: &CaKeyVersion) -> Result<shroudb_crypto::SecretBy
                 .map_err(|e| ForgeError::Crypto(format!("invalid key material hex: {e}")))
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- CaAlgorithm::from_config ---
+
+    #[test]
+    fn ca_algorithm_from_config_ecdsa_p256_variants() {
+        assert_eq!(
+            CaAlgorithm::from_config("ecdsa-p256"),
+            Some(CaAlgorithm::EcdsaP256)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("ecdsap256"),
+            Some(CaAlgorithm::EcdsaP256)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("p256"),
+            Some(CaAlgorithm::EcdsaP256)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("ecdsa_p256"),
+            Some(CaAlgorithm::EcdsaP256)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("ECDSA-P256"),
+            Some(CaAlgorithm::EcdsaP256)
+        );
+    }
+
+    #[test]
+    fn ca_algorithm_from_config_ecdsa_p384_variants() {
+        assert_eq!(
+            CaAlgorithm::from_config("ecdsa-p384"),
+            Some(CaAlgorithm::EcdsaP384)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("ecdsap384"),
+            Some(CaAlgorithm::EcdsaP384)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("p384"),
+            Some(CaAlgorithm::EcdsaP384)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("ecdsa_p384"),
+            Some(CaAlgorithm::EcdsaP384)
+        );
+    }
+
+    #[test]
+    fn ca_algorithm_from_config_ed25519_variants() {
+        assert_eq!(
+            CaAlgorithm::from_config("ed25519"),
+            Some(CaAlgorithm::Ed25519)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("eddsa"),
+            Some(CaAlgorithm::Ed25519)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("ED25519"),
+            Some(CaAlgorithm::Ed25519)
+        );
+    }
+
+    #[test]
+    fn ca_algorithm_from_config_unknown() {
+        assert_eq!(CaAlgorithm::from_config("rsa-2048"), None);
+        assert_eq!(CaAlgorithm::from_config(""), None);
+        assert_eq!(CaAlgorithm::from_config("bogus"), None);
+    }
+
+    #[test]
+    fn ca_algorithm_from_str() {
+        assert_eq!(
+            "p256".parse::<CaAlgorithm>().unwrap(),
+            CaAlgorithm::EcdsaP256
+        );
+        assert_eq!(
+            "ed25519".parse::<CaAlgorithm>().unwrap(),
+            CaAlgorithm::Ed25519
+        );
+        assert!("rsa-4096".parse::<CaAlgorithm>().is_err());
+    }
+
+    #[test]
+    fn ca_algorithm_wire_name() {
+        assert_eq!(CaAlgorithm::EcdsaP256.wire_name(), "ecdsa-p256");
+        assert_eq!(CaAlgorithm::EcdsaP384.wire_name(), "ecdsa-p384");
+        assert_eq!(CaAlgorithm::Ed25519.wire_name(), "ed25519");
+    }
+
+    #[test]
+    fn ca_algorithm_display() {
+        assert_eq!(format!("{}", CaAlgorithm::EcdsaP256), "ecdsa-p256");
+        assert_eq!(format!("{}", CaAlgorithm::Ed25519), "ed25519");
+    }
+
+    // --- CertificateAuthority methods ---
+
+    fn test_ca() -> CertificateAuthority {
+        CertificateAuthority {
+            name: "test-ca".into(),
+            subject: "CN=Test CA".into(),
+            algorithm: CaAlgorithm::EcdsaP256,
+            ttl_days: 365,
+            parent: None,
+            rotation_days: 90,
+            drain_days: 30,
+            created_at: 1000,
+            disabled: false,
+            key_versions: vec![
+                CaKeyVersion {
+                    version: 1,
+                    state: KeyState::Retired,
+                    key_material: None,
+                    public_key: None,
+                    certificate_pem: String::new(),
+                    created_at: 1000,
+                    activated_at: Some(1000),
+                    draining_since: Some(2000),
+                    retired_at: Some(3000),
+                },
+                CaKeyVersion {
+                    version: 2,
+                    state: KeyState::Draining,
+                    key_material: None,
+                    public_key: None,
+                    certificate_pem: String::new(),
+                    created_at: 2000,
+                    activated_at: Some(2000),
+                    draining_since: Some(3000),
+                    retired_at: None,
+                },
+                CaKeyVersion {
+                    version: 3,
+                    state: KeyState::Active,
+                    key_material: Some("aabb".into()),
+                    public_key: Some("ccdd".into()),
+                    certificate_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"
+                        .into(),
+                    created_at: 3000,
+                    activated_at: Some(3000),
+                    draining_since: None,
+                    retired_at: None,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn active_key_returns_active_version() {
+        let ca = test_ca();
+        let active = ca.active_key().unwrap();
+        assert_eq!(active.version, 3);
+        assert_eq!(active.state, KeyState::Active);
+    }
+
+    #[test]
+    fn active_key_none_when_no_active() {
+        let mut ca = test_ca();
+        for kv in &mut ca.key_versions {
+            kv.state = KeyState::Retired;
+        }
+        assert!(ca.active_key().is_none());
+    }
+
+    #[test]
+    fn key_version_by_number() {
+        let ca = test_ca();
+        assert_eq!(ca.key_version(1).unwrap().state, KeyState::Retired);
+        assert_eq!(ca.key_version(2).unwrap().state, KeyState::Draining);
+        assert_eq!(ca.key_version(3).unwrap().state, KeyState::Active);
+        assert!(ca.key_version(99).is_none());
+    }
+
+    #[test]
+    fn next_version() {
+        let ca = test_ca();
+        assert_eq!(ca.next_version(), 4);
+    }
+
+    #[test]
+    fn next_version_empty() {
+        let mut ca = test_ca();
+        ca.key_versions.clear();
+        assert_eq!(ca.next_version(), 1);
+    }
+
+    #[test]
+    fn verifiable_keys_includes_active_and_draining() {
+        let ca = test_ca();
+        let verifiable = ca.verifiable_keys();
+        assert_eq!(verifiable.len(), 2);
+        let versions: Vec<u32> = verifiable.iter().map(|kv| kv.version).collect();
+        assert!(versions.contains(&2)); // Draining
+        assert!(versions.contains(&3)); // Active
+    }
+
+    #[test]
+    fn decode_key_material_missing() {
+        let kv = CaKeyVersion {
+            version: 1,
+            state: KeyState::Active,
+            key_material: None,
+            public_key: None,
+            certificate_pem: String::new(),
+            created_at: 0,
+            activated_at: None,
+            draining_since: None,
+            retired_at: None,
+        };
+        assert!(decode_key_material(&kv).is_err());
+    }
+
+    #[test]
+    fn decode_key_material_invalid_hex() {
+        let kv = CaKeyVersion {
+            version: 1,
+            state: KeyState::Active,
+            key_material: Some("not-valid-hex!".into()),
+            public_key: None,
+            certificate_pem: String::new(),
+            created_at: 0,
+            activated_at: None,
+            draining_since: None,
+            retired_at: None,
+        };
+        assert!(decode_key_material(&kv).is_err());
+    }
+
+    #[test]
+    fn decode_key_material_valid_hex() {
+        let kv = CaKeyVersion {
+            version: 1,
+            state: KeyState::Active,
+            key_material: Some("deadbeef".into()),
+            public_key: None,
+            certificate_pem: String::new(),
+            created_at: 0,
+            activated_at: None,
+            draining_since: None,
+            retired_at: None,
+        };
+        let result = decode_key_material(&kv).unwrap();
+        assert_eq!(result.as_bytes(), &[0xDE, 0xAD, 0xBE, 0xEF]);
+    }
+}
