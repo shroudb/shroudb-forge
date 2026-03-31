@@ -15,6 +15,8 @@ const SUPPORTED_COMMANDS: &[&str] = &[
     "CA LIST",
     "CA ROTATE",
     "CA EXPORT",
+    "CA REGENERATE_CRL",
+    "REGENERATE_CRL",
     "ISSUE",
     "ISSUE_FROM_CSR",
     "REVOKE",
@@ -279,6 +281,14 @@ pub async fn dispatch<S: Store>(
             }
         }
 
+        ForgeCommand::RegenerateCrl { ca } => match engine.regenerate_crl(&ca, actor).await {
+            Ok(()) => ForgeResponse::ok(serde_json::json!({
+                "status": "ok",
+                "ca": ca,
+            })),
+            Err(e) => ForgeResponse::error(e.to_string()),
+        },
+
         // ── Operational ───────────────────────────────────────────
         ForgeCommand::Health => ForgeResponse::ok(serde_json::json!({
             "status": "ok",
@@ -523,5 +533,45 @@ mod tests {
             }
             _ => panic!("expected ok"),
         }
+    }
+
+    #[tokio::test]
+    async fn regenerate_crl_flow() {
+        let engine = setup().await;
+        setup_with_ca(&engine).await;
+
+        // Issue and revoke a cert so CRL has content
+        let cmd = parse_command(&["ISSUE", "internal", "CN=svc", "server"]).unwrap();
+        let resp = dispatch(&engine, cmd, None).await;
+        let serial = match &resp {
+            ForgeResponse::Ok(v) => v["serial"].as_str().unwrap().to_string(),
+            _ => panic!("expected ok"),
+        };
+
+        let cmd = parse_command(&["REVOKE", "internal", &serial]).unwrap();
+        let resp = dispatch(&engine, cmd, None).await;
+        assert!(resp.is_ok(), "REVOKE failed: {resp:?}");
+
+        // Regenerate CRL
+        let cmd = parse_command(&["CA", "REGENERATE_CRL", "internal"]).unwrap();
+        let resp = dispatch(&engine, cmd, None).await;
+        assert!(resp.is_ok(), "REGENERATE_CRL failed: {resp:?}");
+
+        match &resp {
+            ForgeResponse::Ok(v) => {
+                assert_eq!(v["status"], "ok");
+                assert_eq!(v["ca"], "internal");
+            }
+            _ => panic!("expected ok"),
+        }
+    }
+
+    #[tokio::test]
+    async fn regenerate_crl_nonexistent_ca() {
+        let engine = setup().await;
+
+        let cmd = parse_command(&["REGENERATE_CRL", "nope"]).unwrap();
+        let resp = dispatch(&engine, cmd, None).await;
+        assert!(!resp.is_ok(), "expected error for nonexistent CA");
     }
 }

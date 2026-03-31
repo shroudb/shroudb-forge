@@ -172,20 +172,27 @@ impl<S: Store> ForgeEngine<S> {
         &self.certs
     }
 
-    pub fn config(&self) -> &ForgeConfig {
-        &self.config
-    }
-
     // ── CA management ───────────────────────────────────────────────
 
     pub async fn ca_create(
         &self,
         name: &str,
         algorithm: CaAlgorithm,
-        opts: CaCreateOpts,
+        mut opts: CaCreateOpts,
         actor: Option<&str>,
     ) -> Result<CaInfoResult, ForgeError> {
         self.check_policy(name, "ca_create", actor).await?;
+        // Apply config defaults for fields still at their placeholder values
+        let defaults = CaCreateOpts::default();
+        if opts.ttl_days == defaults.ttl_days {
+            opts.ttl_days = self.config.default_ca_ttl_days;
+        }
+        if opts.rotation_days == defaults.rotation_days {
+            opts.rotation_days = self.config.default_rotation_days;
+        }
+        if opts.drain_days == defaults.drain_days {
+            opts.drain_days = self.config.default_drain_days;
+        }
         let ca = self.cas.create(name, algorithm, opts).await?;
         // Initialize cert namespace for the new CA
         self.certs.init_for_ca(name).await?;

@@ -28,6 +28,9 @@ pub enum ForgeCommand {
     CaExport {
         ca: String,
     },
+    RegenerateCrl {
+        ca: String,
+    },
 
     // Certificate operations
     Issue {
@@ -83,7 +86,9 @@ impl ForgeCommand {
             | ForgeCommand::CaList => AclRequirement::None,
 
             // Structural changes → admin
-            ForgeCommand::CaCreate { .. } | ForgeCommand::CaRotate { .. } => AclRequirement::Admin,
+            ForgeCommand::CaCreate { .. }
+            | ForgeCommand::CaRotate { .. }
+            | ForgeCommand::RegenerateCrl { .. } => AclRequirement::Admin,
 
             // Read operations
             ForgeCommand::CaInfo { ca, .. }
@@ -137,6 +142,14 @@ pub fn parse_command(args: &[&str]) -> Result<ForgeCommand, String> {
         "INSPECT" => parse_inspect(args),
         "LIST_CERTS" => parse_list_certs(args),
         "RENEW" => parse_renew(args),
+        "REGENERATE_CRL" => {
+            if args.len() < 2 {
+                return Err("REGENERATE_CRL <ca>".into());
+            }
+            Ok(ForgeCommand::RegenerateCrl {
+                ca: args[1].to_string(),
+            })
+        }
         "HEALTH" => Ok(ForgeCommand::Health),
         "PING" => Ok(ForgeCommand::Ping),
         "COMMAND" => Ok(ForgeCommand::CommandList),
@@ -199,6 +212,14 @@ fn parse_ca(args: &[&str]) -> Result<ForgeCommand, String> {
                 return Err("CA EXPORT <name>".into());
             }
             Ok(ForgeCommand::CaExport {
+                ca: args[2].to_string(),
+            })
+        }
+        "REGENERATE_CRL" => {
+            if args.len() < 3 {
+                return Err("CA REGENERATE_CRL <name>".into());
+            }
+            Ok(ForgeCommand::RegenerateCrl {
                 ca: args[2].to_string(),
             })
         }
@@ -601,5 +622,28 @@ mod tests {
     #[test]
     fn unknown_ca_subcommand_errors() {
         assert!(parse_command(&["CA", "DESTROY", "internal"]).is_err());
+    }
+
+    #[test]
+    fn parse_regenerate_crl_via_ca_subcommand() {
+        let cmd = parse_command(&["CA", "REGENERATE_CRL", "internal"]).unwrap();
+        assert!(matches!(
+            cmd,
+            ForgeCommand::RegenerateCrl { ca } if ca == "internal"
+        ));
+    }
+
+    #[test]
+    fn parse_regenerate_crl_top_level() {
+        let cmd = parse_command(&["REGENERATE_CRL", "internal"]).unwrap();
+        assert!(matches!(
+            cmd,
+            ForgeCommand::RegenerateCrl { ca } if ca == "internal"
+        ));
+    }
+
+    #[test]
+    fn regenerate_crl_missing_ca_errors() {
+        assert!(parse_command(&["REGENERATE_CRL"]).is_err());
     }
 }
