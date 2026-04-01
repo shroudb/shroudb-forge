@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::ForgeError;
@@ -47,7 +49,7 @@ impl std::str::FromStr for CaAlgorithm {
 }
 
 /// A single version of a CA signing key.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct CaKeyVersion {
     pub version: u32,
     pub state: KeyState,
@@ -61,6 +63,28 @@ pub struct CaKeyVersion {
     pub activated_at: Option<u64>,
     pub draining_since: Option<u64>,
     pub retired_at: Option<u64>,
+}
+
+impl fmt::Debug for CaKeyVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CaKeyVersion")
+            .field("version", &self.version)
+            .field("state", &self.state)
+            .field(
+                "key_material",
+                &match &self.key_material {
+                    Some(_) => "[REDACTED]",
+                    None => "None",
+                },
+            )
+            .field("public_key", &self.public_key)
+            .field("certificate_pem", &self.certificate_pem)
+            .field("created_at", &self.created_at)
+            .field("activated_at", &self.activated_at)
+            .field("draining_since", &self.draining_since)
+            .field("retired_at", &self.retired_at)
+            .finish()
+    }
 }
 
 /// A Certificate Authority with versioned signing keys.
@@ -382,5 +406,26 @@ mod tests {
         };
         let result = decode_key_material(&kv).unwrap();
         assert_eq!(result.as_bytes(), &[0xDE, 0xAD, 0xBE, 0xEF]);
+    }
+
+    #[test]
+    fn debug_redacts_key_material() {
+        let kv = CaKeyVersion {
+            version: 1,
+            state: KeyState::Active,
+            key_material: Some("secret".into()),
+            public_key: Some("pub".into()),
+            certificate_pem: "cert".into(),
+            created_at: 100,
+            activated_at: Some(100),
+            draining_since: None,
+            retired_at: None,
+        };
+        let debug = format!("{:?}", kv);
+        assert!(
+            debug.contains("[REDACTED]"),
+            "expected [REDACTED] in: {debug}"
+        );
+        assert!(!debug.contains("secret"), "key material leaked in: {debug}");
     }
 }
