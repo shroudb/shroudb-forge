@@ -133,8 +133,8 @@ impl<S: Store> ForgeEngine<S> {
         })
     }
 
-    /// Emit an audit event to Chronicle. Warn-only on failure — Forge is
-    /// infrastructure and must not fail because auditing is unavailable.
+    /// Emit an audit event to Chronicle. Fail-closed for security-critical
+    /// operations — cert issuance and key rotation must not proceed unaudited.
     async fn emit_audit_event(
         &self,
         operation: &str,
@@ -142,9 +142,9 @@ impl<S: Store> ForgeEngine<S> {
         result: EventResult,
         actor: Option<&str>,
         start: Instant,
-    ) {
+    ) -> Result<(), ForgeError> {
         let Some(chronicle) = &self.chronicle else {
-            return;
+            return Ok(());
         };
         let mut event = Event::new(
             AuditEngine::Forge,
@@ -154,9 +154,10 @@ impl<S: Store> ForgeEngine<S> {
             actor.unwrap_or("anonymous").to_string(),
         );
         event.duration_ms = start.elapsed().as_millis() as u64;
-        if let Err(e) = chronicle.record(event).await {
-            tracing::warn!(operation, resource, error = %e, "failed to emit audit event");
-        }
+        chronicle
+            .record(event)
+            .await
+            .map_err(|e| ForgeError::Internal(format!("audit failed: {e}")))
     }
 
     async fn check_policy(
@@ -229,7 +230,7 @@ impl<S: Store> ForgeEngine<S> {
         // Initialize cert namespace for the new CA
         self.certs.init_for_ca(name).await?;
         self.emit_audit_event("CA_CREATE", name, EventResult::Ok, actor, start)
-            .await;
+            .await?;
         Ok(ca_to_info(&ca))
     }
 
@@ -319,7 +320,7 @@ impl<S: Store> ForgeEngine<S> {
         tracing::info!(ca = name, new_version, previous_version, "CA key rotated");
 
         self.emit_audit_event("CA_ROTATE", name, EventResult::Ok, actor, start)
-            .await;
+            .await?;
         Ok(RotateResult {
             key_version: new_version,
             previous_version: Some(previous_version),
@@ -428,7 +429,7 @@ impl<S: Store> ForgeEngine<S> {
 
         let resource = format!("{ca_name}/{}", issued.serial);
         self.emit_audit_event("ISSUE", &resource, EventResult::Ok, actor, start)
-            .await;
+            .await?;
         Ok(IssueResult {
             certificate_pem: issued.certificate_pem,
             private_key_pem: issued.private_key_pem,
@@ -525,7 +526,7 @@ impl<S: Store> ForgeEngine<S> {
 
         let resource = format!("{ca_name}/{}", issued.serial);
         self.emit_audit_event("ISSUE_FROM_CSR", &resource, EventResult::Ok, actor, start)
-            .await;
+            .await?;
         Ok(IssueResult {
             certificate_pem: issued.certificate_pem,
             private_key_pem: issued.private_key_pem,
@@ -583,7 +584,7 @@ impl<S: Store> ForgeEngine<S> {
 
         let resource = format!("{ca_name}/{serial}");
         self.emit_audit_event("REVOKE", &resource, EventResult::Ok, actor, start)
-            .await;
+            .await?;
         tracing::info!(ca = ca_name, serial, "certificate revoked");
         Ok(())
     }
@@ -686,7 +687,7 @@ impl<S: Store> ForgeEngine<S> {
 
         self.certs.set_crl_pem(ca_name, crl_pem);
         self.emit_audit_event("REGENERATE_CRL", ca_name, EventResult::Ok, actor, start)
-            .await;
+            .await?;
         Ok(())
     }
 }
