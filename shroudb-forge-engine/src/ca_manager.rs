@@ -458,6 +458,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_corrupt_ca_data_handled() {
+        let store = shroudb_storage::test_util::create_test_store("forge-test").await;
+
+        // Create the namespace manually and write invalid JSON bytes
+        store
+            .namespace_create("forge.cas", shroudb_store::NamespaceConfig::default())
+            .await
+            .unwrap();
+        store
+            .put("forge.cas", b"corrupt-ca", b"not valid json {{{", None)
+            .await
+            .unwrap();
+
+        // init() should return an error for the corrupt entry, not panic
+        let mgr = CaManager::new(store);
+        let result = mgr.init().await;
+        assert!(
+            result.is_err(),
+            "init should return an error for corrupt data"
+        );
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("corrupt") || msg.contains("invalid") || msg.contains("expected"),
+            "error should mention corruption: {msg}"
+        );
+    }
+
+    #[tokio::test]
     async fn create_intermediate_ca() {
         let store = shroudb_storage::test_util::create_test_store("forge-test").await;
         let mgr = CaManager::new(store);
