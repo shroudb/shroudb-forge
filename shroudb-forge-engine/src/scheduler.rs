@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use shroudb_forge_core::ca::decode_key_material;
-use shroudb_forge_core::key_state::KeyState;
 use shroudb_store::Store;
 use tokio::sync::watch;
 
@@ -73,40 +72,14 @@ async fn run_cycle<S: Store>(engine: &ForgeEngine<S>) -> Result<(), String> {
             }
         }
 
-        // Auto-retire: draining keys past drain_days
-        let should_retire: Vec<u32> = ca
-            .key_versions
-            .iter()
-            .filter(|kv| kv.state == KeyState::Draining)
-            .filter(|kv| {
-                kv.draining_since
-                    .map(|ds| (now.saturating_sub(ds)) / 86400 >= ca.drain_days as u64)
-                    .unwrap_or(false)
-            })
-            .map(|kv| kv.version)
-            .collect();
-
-        if !should_retire.is_empty() {
-            let result = engine
-                .ca_manager()
-                .update(&name, |ca| {
-                    for kv in &mut ca.key_versions {
-                        if should_retire.contains(&kv.version) && kv.state == KeyState::Draining {
-                            kv.state = KeyState::Retired;
-                            kv.retired_at = Some(now);
-                            kv.key_material = None;
-                            tracing::info!(
-                                ca = ca.name,
-                                version = kv.version,
-                                "auto-retired key version"
-                            );
-                        }
-                    }
-                    Ok(())
-                })
-                .await;
-
-            if let Err(e) = result {
+        // Auto-retire: draining keys past drain_days (with zeroization)
+        match engine.ca_manager().retire_draining_keys(&name).await {
+            Ok(retired) => {
+                for v in &retired {
+                    tracing::info!(ca = name, version = v, "auto-retired key version");
+                }
+            }
+            Err(e) => {
                 tracing::warn!(ca = name, error = %e, "auto-retirement failed");
             }
         }

@@ -13,6 +13,7 @@ use shroudb_forge_core::key_state::KeyState;
 use shroudb_forge_core::name::validate_name;
 use shroudb_forge_core::x509;
 use shroudb_store::Store;
+use zeroize::Zeroize;
 
 const CAS_NAMESPACE: &str = "forge.cas";
 
@@ -40,7 +41,7 @@ impl Default for CaCreateOpts {
 /// Manages Certificate Authorities with Store-backed persistence and in-memory cache.
 pub struct CaManager<S: Store> {
     store: Arc<S>,
-    cache: DashMap<String, CertificateAuthority>,
+    cache: DashMap<String, Arc<CertificateAuthority>>,
 }
 
 impl<S: Store> CaManager<S> {
@@ -79,7 +80,7 @@ impl<S: Store> CaManager<S> {
                     .map_err(|e| ForgeError::Store(e.to_string()))?;
                 let ca: CertificateAuthority = serde_json::from_slice(&entry.value)
                     .map_err(|e| ForgeError::Internal(format!("corrupt CA data: {e}")))?;
-                self.cache.insert(ca.name.clone(), ca);
+                self.cache.insert(ca.name.clone(), Arc::new(ca));
             }
 
             if page.cursor.is_none() {
@@ -102,7 +103,7 @@ impl<S: Store> CaManager<S> {
         name: &str,
         algorithm: CaAlgorithm,
         opts: CaCreateOpts,
-    ) -> Result<CertificateAuthority, ForgeError> {
+    ) -> Result<Arc<CertificateAuthority>, ForgeError> {
         validate_name(name)?;
 
         if self.cache.contains_key(name) {
@@ -184,7 +185,8 @@ impl<S: Store> CaManager<S> {
         };
 
         self.save(&ca).await?;
-        self.cache.insert(name.to_string(), ca.clone());
+        let ca = Arc::new(ca);
+        self.cache.insert(name.to_string(), Arc::clone(&ca));
 
         tracing::info!(
             ca = name,
@@ -197,10 +199,10 @@ impl<S: Store> CaManager<S> {
     }
 
     /// Get a CA by name from cache.
-    pub fn get(&self, name: &str) -> Result<CertificateAuthority, ForgeError> {
+    pub fn get(&self, name: &str) -> Result<Arc<CertificateAuthority>, ForgeError> {
         self.cache
             .get(name)
-            .map(|r| r.value().clone())
+            .map(|r| Arc::clone(r.value()))
             .ok_or_else(|| ForgeError::CaNotFound {
                 name: name.to_string(),
             })
@@ -216,12 +218,60 @@ impl<S: Store> CaManager<S> {
         &self,
         name: &str,
         f: impl FnOnce(&mut CertificateAuthority) -> Result<(), ForgeError>,
-    ) -> Result<CertificateAuthority, ForgeError> {
-        let mut ca = self.get(name)?;
+    ) -> Result<Arc<CertificateAuthority>, ForgeError> {
+        let arc = self.get(name)?;
+        let mut ca = Arc::unwrap_or_clone(arc);
         f(&mut ca)?;
         self.save(&ca).await?;
-        self.cache.insert(name.to_string(), ca.clone());
+        let ca = Arc::new(ca);
+        self.cache.insert(name.to_string(), Arc::clone(&ca));
         Ok(ca)
+    }
+
+    /// Retire draining keys that have exceeded the drain period.
+    /// Zeroizes private key material before clearing it.
+    pub async fn retire_draining_keys(&self, name: &str) -> Result<Vec<u32>, ForgeError> {
+        let ca = self.get(name)?;
+        let now = unix_now();
+        let drain_secs = ca.drain_days as u64 * 86400;
+
+        let to_retire: Vec<u32> = ca
+            .key_versions
+            .iter()
+            .filter(|kv| kv.state == KeyState::Draining)
+            .filter(|kv| {
+                kv.draining_since
+                    .is_some_and(|ds| now.saturating_sub(ds) >= drain_secs)
+            })
+            .map(|kv| kv.version)
+            .collect();
+
+        if to_retire.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        self.update(name, |ca| {
+            for kv in &mut ca.key_versions {
+                if to_retire.contains(&kv.version) && kv.state.can_transition_to(KeyState::Retired)
+                {
+                    kv.state = KeyState::Retired;
+                    kv.retired_at = Some(now);
+                    // Zeroize private key material before clearing
+                    if let Some(ref mut km) = kv.key_material {
+                        km.zeroize();
+                    }
+                    kv.key_material = None;
+                }
+            }
+            Ok(())
+        })
+        .await?;
+
+        for v in &to_retire {
+            tracing::info!(ca = name, version = v, "CA key retired");
+        }
+
+        Ok(to_retire)
     }
 
     /// Persist a CA to the Store.
@@ -448,5 +498,71 @@ mod tests {
                 .certificate_pem
                 .starts_with("-----BEGIN CERTIFICATE-----")
         );
+    }
+
+    #[tokio::test]
+    async fn retire_zeroizes_key_material() {
+        let store = shroudb_storage::test_util::create_test_store("forge-test").await;
+        let mgr = CaManager::new(store);
+        mgr.init().await.unwrap();
+
+        // Create a CA (version 1 = Active)
+        mgr.create(
+            "test-retire",
+            CaAlgorithm::EcdsaP256,
+            CaCreateOpts {
+                subject: "CN=Retire Test CA".into(),
+                drain_days: 0, // immediate retirement eligibility
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // Verify version 1 has key material
+        let ca = mgr.get("test-retire").unwrap();
+        assert!(ca.key_versions[0].key_material.is_some());
+
+        // Rotate: version 1 becomes Draining, version 2 becomes Active
+        let now = unix_now();
+        mgr.update("test-retire", |ca| {
+            if let Some(active_key) = ca.active_key_mut() {
+                active_key.state = KeyState::Draining;
+                active_key.draining_since = Some(now);
+            }
+            ca.key_versions.push(CaKeyVersion {
+                version: 2,
+                state: KeyState::Active,
+                key_material: Some("newkey".into()),
+                public_key: Some("newpub".into()),
+                certificate_pem: ca.key_versions[0].certificate_pem.clone(),
+                created_at: now,
+                activated_at: Some(now),
+                draining_since: None,
+                retired_at: None,
+            });
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        // Verify version 1 is Draining with key material still present
+        let ca = mgr.get("test-retire").unwrap();
+        assert_eq!(ca.key_versions[0].state, KeyState::Draining);
+        assert!(ca.key_versions[0].key_material.is_some());
+
+        // Retire draining keys (drain_days=0 so they're immediately eligible)
+        let retired = mgr.retire_draining_keys("test-retire").await.unwrap();
+        assert_eq!(retired, vec![1]);
+
+        // Verify version 1 is Retired with key material zeroized/cleared
+        let ca = mgr.get("test-retire").unwrap();
+        assert_eq!(ca.key_versions[0].state, KeyState::Retired);
+        assert!(ca.key_versions[0].key_material.is_none());
+        assert!(ca.key_versions[0].retired_at.is_some());
+
+        // Verify version 2 is still Active with key material intact
+        assert_eq!(ca.key_versions[1].state, KeyState::Active);
+        assert!(ca.key_versions[1].key_material.is_some());
     }
 }
