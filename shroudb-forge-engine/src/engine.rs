@@ -1340,4 +1340,60 @@ mod tests {
             "rotated key material must not be empty"
         );
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_concurrent_issue_from_same_ca() {
+        let engine = Arc::new(setup().await);
+
+        engine
+            .ca_create(
+                "concurrent-ca",
+                CaAlgorithm::EcdsaP256,
+                CaCreateOpts {
+                    subject: "CN=Concurrent CA".into(),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        let mut handles = Vec::new();
+        for i in 0..5 {
+            let eng = engine.clone();
+            handles.push(tokio::spawn(async move {
+                eng.issue(
+                    "concurrent-ca",
+                    &format!("CN=svc-{i}"),
+                    "server",
+                    Some("1h"),
+                    &[],
+                    &[],
+                    None,
+                )
+                .await
+            }));
+        }
+
+        let mut serials = std::collections::HashSet::new();
+        for handle in handles {
+            let result = handle.await.unwrap().unwrap();
+            assert!(
+                result
+                    .certificate_pem
+                    .starts_with("-----BEGIN CERTIFICATE-----"),
+                "cert PEM must be valid"
+            );
+            assert!(
+                serials.insert(result.serial.clone()),
+                "duplicate serial detected: {}",
+                result.serial
+            );
+        }
+        assert_eq!(serials.len(), 5, "all 5 certs must have unique serials");
+
+        // Verify CA state is consistent — all certs are listed.
+        let certs = engine.list_certs("concurrent-ca", None, None, None);
+        assert_eq!(certs.len(), 5, "CA must list all 5 issued certs");
+    }
 }
