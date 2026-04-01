@@ -1594,6 +1594,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "shroudb-client-common"
+version = "0.1.0"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "6ba7d69d552424894bc83e9cfe134b13c5c52ed6a753e9f6ce6dd09fa2335677"
+dependencies = [
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "shroudb-crypto"
 version = "0.1.1"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
@@ -1634,8 +1645,8 @@ version = "1.5.0"
 dependencies = [
  "serde",
  "serde_json",
+ "shroudb-client-common",
  "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
