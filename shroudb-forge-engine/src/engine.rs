@@ -14,6 +14,7 @@ use shroudb_forge_core::x509;
 use shroudb_store::Store;
 
 use crate::ca_manager::{CaCreateOpts, CaManager};
+use crate::capabilities::ForgeKeepOps;
 use crate::cert_manager::{CertManager, CertSummary};
 
 /// Configuration for the Forge engine.
@@ -103,6 +104,7 @@ pub struct ForgeEngine<S: Store> {
     pub(crate) config: ForgeConfig,
     policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
     chronicle: Option<Arc<dyn ChronicleOps>>,
+    keep: Option<Box<dyn ForgeKeepOps>>,
 }
 
 impl<S: Store> ForgeEngine<S> {
@@ -112,6 +114,7 @@ impl<S: Store> ForgeEngine<S> {
         config: ForgeConfig,
         policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
         chronicle: Option<Arc<dyn ChronicleOps>>,
+        keep: Option<Box<dyn ForgeKeepOps>>,
     ) -> Result<Self, ForgeError> {
         let cas = CaManager::new(store.clone());
         cas.init().await?;
@@ -130,6 +133,7 @@ impl<S: Store> ForgeEngine<S> {
             config,
             policy_evaluator,
             chronicle,
+            keep,
         })
     }
 
@@ -229,6 +233,19 @@ impl<S: Store> ForgeEngine<S> {
         let ca = self.cas.create(name, algorithm, opts).await?;
         // Initialize cert namespace for the new CA
         self.certs.init_for_ca(name).await?;
+
+        // Store key material in Keep for defense-in-depth encryption
+        if let Some(ref keep) = self.keep {
+            let active = ca.active_key().ok_or_else(|| ForgeError::NoActiveKey {
+                ca: name.to_string(),
+            })?;
+            if let Some(ref km) = active.key_material {
+                let path = format!("forge/{name}/v{}", active.version);
+                keep.store_key(&path, km.as_bytes()).await?;
+                tracing::info!(ca = name, version = active.version, "CA key stored in Keep");
+            }
+        }
+
         self.emit_audit_event("CA_CREATE", name, EventResult::Ok, actor, start)
             .await?;
         Ok(ca_to_info(&ca))
@@ -318,6 +335,18 @@ impl<S: Store> ForgeEngine<S> {
             .await?;
 
         tracing::info!(ca = name, new_version, previous_version, "CA key rotated");
+
+        // Store new key material in Keep for defense-in-depth encryption
+        if let Some(ref keep) = self.keep {
+            let path = format!("forge/{name}/v{new_version}");
+            keep.store_key(&path, generated.private_key.as_bytes())
+                .await?;
+            tracing::info!(
+                ca = name,
+                version = new_version,
+                "rotated CA key stored in Keep"
+            );
+        }
 
         self.emit_audit_event("CA_ROTATE", name, EventResult::Ok, actor, start)
             .await?;
@@ -762,9 +791,16 @@ mod tests {
 
     async fn setup() -> ForgeEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("forge-test").await;
-        ForgeEngine::new(store, test_profiles(), ForgeConfig::default(), None, None)
-            .await
-            .unwrap()
+        ForgeEngine::new(
+            store,
+            test_profiles(),
+            ForgeConfig::default(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
@@ -1031,5 +1067,169 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ForgeError::ProfileNotFound { .. }));
+    }
+
+    // ── KeepOps tests ──────────────────────────────────────────────
+
+    use std::sync::Mutex;
+
+    use crate::capabilities::ForgeKeepOps;
+
+    /// Mock implementation of ForgeKeepOps that records calls.
+    struct MockKeepOps {
+        stored: Mutex<Vec<(String, Vec<u8>)>>,
+    }
+
+    impl MockKeepOps {
+        fn new() -> Self {
+            Self {
+                stored: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn stored_keys(&self) -> Vec<(String, Vec<u8>)> {
+            self.stored.lock().unwrap().clone()
+        }
+    }
+
+    impl ForgeKeepOps for MockKeepOps {
+        fn store_key(
+            &self,
+            path: &str,
+            key_material: &[u8],
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, ForgeError>> + Send + '_>>
+        {
+            self.stored
+                .lock()
+                .unwrap()
+                .push((path.to_string(), key_material.to_vec()));
+            Box::pin(async { Ok(1) })
+        }
+
+        fn get_key(
+            &self,
+            _path: &str,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Vec<u8>, ForgeError>> + Send + '_>,
+        > {
+            Box::pin(async { Ok(vec![]) })
+        }
+    }
+
+    async fn setup_with_keep(
+        keep: Box<dyn ForgeKeepOps>,
+    ) -> ForgeEngine<shroudb_storage::EmbeddedStore> {
+        let store = shroudb_storage::test_util::create_test_store("forge-test").await;
+        ForgeEngine::new(
+            store,
+            test_profiles(),
+            ForgeConfig::default(),
+            None,
+            None,
+            Some(keep),
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_ca_create_stores_key_in_keep() {
+        let mock = Arc::new(MockKeepOps::new());
+        // Wrap in a forwarding adapter so we can inspect mock after engine takes ownership
+        struct ForwardKeep(Arc<MockKeepOps>);
+        impl ForgeKeepOps for ForwardKeep {
+            fn store_key(
+                &self,
+                path: &str,
+                key_material: &[u8],
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<u64, ForgeError>> + Send + '_>,
+            > {
+                self.0.store_key(path, key_material)
+            }
+            fn get_key(
+                &self,
+                path: &str,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<Vec<u8>, ForgeError>> + Send + '_>,
+            > {
+                self.0.get_key(path)
+            }
+        }
+
+        let engine = setup_with_keep(Box::new(ForwardKeep(mock.clone()))).await;
+
+        engine
+            .ca_create(
+                "internal",
+                CaAlgorithm::EcdsaP256,
+                CaCreateOpts {
+                    subject: "CN=Internal CA".into(),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        let stored = mock.stored_keys();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].0, "forge/internal/v1");
+        assert!(!stored[0].1.is_empty(), "key material must not be empty");
+    }
+
+    #[tokio::test]
+    async fn test_ca_rotate_stores_new_key_in_keep() {
+        let mock = Arc::new(MockKeepOps::new());
+        struct ForwardKeep(Arc<MockKeepOps>);
+        impl ForgeKeepOps for ForwardKeep {
+            fn store_key(
+                &self,
+                path: &str,
+                key_material: &[u8],
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<u64, ForgeError>> + Send + '_>,
+            > {
+                self.0.store_key(path, key_material)
+            }
+            fn get_key(
+                &self,
+                path: &str,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<Vec<u8>, ForgeError>> + Send + '_>,
+            > {
+                self.0.get_key(path)
+            }
+        }
+
+        let engine = setup_with_keep(Box::new(ForwardKeep(mock.clone()))).await;
+
+        engine
+            .ca_create(
+                "internal",
+                CaAlgorithm::EcdsaP256,
+                CaCreateOpts {
+                    subject: "CN=Internal CA".into(),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Force rotation
+        engine
+            .ca_rotate("internal", true, false, None)
+            .await
+            .unwrap();
+
+        let stored = mock.stored_keys();
+        assert_eq!(stored.len(), 2);
+        assert_eq!(stored[0].0, "forge/internal/v1");
+        assert_eq!(stored[1].0, "forge/internal/v2");
+        assert!(
+            !stored[1].1.is_empty(),
+            "rotated key material must not be empty"
+        );
     }
 }

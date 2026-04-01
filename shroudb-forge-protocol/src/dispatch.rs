@@ -311,9 +311,16 @@ mod tests {
 
     async fn setup() -> ForgeEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("forge-test").await;
-        ForgeEngine::new(store, test_profiles(), ForgeConfig::default(), None, None)
-            .await
-            .unwrap()
+        ForgeEngine::new(
+            store,
+            test_profiles(),
+            ForgeConfig::default(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap()
     }
 
     fn test_profiles() -> Vec<shroudb_forge_core::profile::CertificateProfile> {
