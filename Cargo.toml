@@ -32,6 +32,7 @@ shroudb-crypto = { version = "0.1.1", registry = "shroudb" }
 shroudb-chronicle-core = { version = "1.2.2", registry = "shroudb" }
 shroudb-protocol-wire = { version = "0.1.0", registry = "shroudb" }
 shroudb-server-tcp = { version = "0.1.0", registry = "shroudb" }
+shroudb-server-bootstrap = { version = "0.1.0", registry = "shroudb" }
 shroudb-client-common = { version = "0.1.0", registry = "shroudb" }
 
 # Crypto / X.509
