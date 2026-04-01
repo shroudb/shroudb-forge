@@ -19,6 +19,7 @@ shroudb-store = { workspace = true }
 shroudb-storage = { workspace = true }
 shroudb-crypto = { workspace = true }
 shroudb-protocol-wire = { workspace = true }
+shroudb-server-tcp = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

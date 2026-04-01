@@ -1619,7 +1619,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-cli"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -1630,7 +1630,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-client"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -1640,7 +1640,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-core"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "hex",
  "pem",
@@ -1657,7 +1657,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-engine"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "base64",
  "dashmap",
@@ -1680,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-protocol"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -1696,7 +1696,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-server"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -1712,6 +1712,7 @@ dependencies = [
  "shroudb-forge-engine",
  "shroudb-forge-protocol",
  "shroudb-protocol-wire",
+ "shroudb-server-tcp",
  "shroudb-storage",
  "shroudb-store",
  "tempfile",
@@ -1729,6 +1730,19 @@ checksum = "a5785b4df3d723d8850bcb818f308b4dc5a8d7f183cb906a751d79c97c5be036"
 dependencies = [
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "shroudb-server-tcp"
+version = "0.1.0"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "595bfdc92325ca901e5af7ef05f92510a4793b26149791da395abcf6441f3bb5"
+dependencies = [
+ "serde_json",
+ "shroudb-acl",
+ "shroudb-protocol-wire",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
