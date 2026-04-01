@@ -4,6 +4,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use shroudb_acl::{PolicyEffect, PolicyEvaluator, PolicyPrincipal, PolicyRequest, PolicyResource};
 use shroudb_chronicle_core::event::{Engine as AuditEngine, Event, EventResult};
 use shroudb_chronicle_core::ops::ChronicleOps;
+use shroudb_courier_core::ops::CourierOps;
 use shroudb_forge_core::ca::{CaAlgorithm, CertificateAuthority, decode_key_material};
 use shroudb_forge_core::cert::{CertState, IssuedCertificate, RevocationReason};
 use shroudb_forge_core::crl;
@@ -105,6 +106,7 @@ pub struct ForgeEngine<S: Store> {
     policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
     chronicle: Option<Arc<dyn ChronicleOps>>,
     keep: Option<Box<dyn ForgeKeepOps>>,
+    courier: Option<Arc<dyn CourierOps>>,
 }
 
 impl<S: Store> ForgeEngine<S> {
@@ -134,7 +136,44 @@ impl<S: Store> ForgeEngine<S> {
             policy_evaluator,
             chronicle,
             keep,
+            courier: None,
         })
+    }
+
+    /// Create a new Forge engine with all capability traits.
+    pub async fn new_with_capabilities(
+        store: Arc<S>,
+        profiles: Vec<CertificateProfile>,
+        config: ForgeConfig,
+        policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
+        chronicle: Option<Arc<dyn ChronicleOps>>,
+        keep: Option<Box<dyn ForgeKeepOps>>,
+        courier: Option<Arc<dyn CourierOps>>,
+    ) -> Result<Self, ForgeError> {
+        let cas = CaManager::new(store.clone());
+        cas.init().await?;
+
+        let certs = CertManager::new(store);
+
+        for name in cas.list() {
+            certs.init_for_ca(&name).await?;
+        }
+
+        Ok(Self {
+            cas,
+            certs,
+            profiles,
+            config,
+            policy_evaluator,
+            chronicle,
+            keep,
+            courier,
+        })
+    }
+
+    /// Access the courier capability (if configured).
+    pub fn courier(&self) -> Option<&Arc<dyn CourierOps>> {
+        self.courier.as_ref()
     }
 
     /// Emit an audit event to Chronicle. Fail-closed for security-critical
@@ -590,6 +629,25 @@ impl<S: Store> ForgeEngine<S> {
         }
 
         let now = unix_now();
+
+        // Generate CRL *before* committing the revocation. Build the revoked
+        // entry list from the store, then append this cert as a pending
+        // revocation. If CRL generation fails the cert stays Active and the
+        // caller gets an error they can retry.
+        let ca = self.cas.get(ca_name)?;
+        let active = ca.active_key().ok_or_else(|| ForgeError::NoActiveKey {
+            ca: ca_name.to_string(),
+        })?;
+        let key_der = decode_key_material(active)?;
+        let mut revoked = self.certs.revoked_for_crl(ca_name);
+        revoked.push(crl::CrlRevokedEntry {
+            serial_hex: serial.to_string(),
+            revoked_at: now,
+        });
+        let crl_pem =
+            crl::generate_crl_pem(key_der.as_bytes(), &ca.subject, ca.algorithm, &revoked)?;
+
+        // CRL succeeded — now commit the revocation to the Store.
         self.certs
             .update(ca_name, serial, |cert| {
                 cert.state = CertState::Revoked;
@@ -598,18 +656,7 @@ impl<S: Store> ForgeEngine<S> {
             })
             .await?;
 
-        // Regenerate CRL — best-effort. If CRL generation fails, the cert
-        // is still revoked in the Store. The scheduler will regenerate the
-        // CRL on its next cycle. We don't want CRL generation failure to
-        // block revocation.
-        if let Err(e) = self.regenerate_crl(ca_name, actor).await {
-            tracing::warn!(
-                ca = ca_name,
-                serial,
-                error = %e,
-                "CRL regeneration failed after revocation — scheduler will retry"
-            );
-        }
+        self.certs.set_crl_pem(ca_name, crl_pem);
 
         let resource = format!("{ca_name}/{serial}");
         self.emit_audit_event("REVOKE", &resource, EventResult::Ok, actor, start)
@@ -944,6 +991,67 @@ mod tests {
 
         let info = engine.inspect("internal", &issued.serial).unwrap();
         assert_eq!(info.state, "revoked");
+    }
+
+    #[tokio::test]
+    async fn revoke_fails_if_crl_generation_fails() {
+        let engine = setup().await;
+
+        engine
+            .ca_create(
+                "internal",
+                CaAlgorithm::EcdsaP256,
+                CaCreateOpts {
+                    subject: "CN=Internal CA".into(),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        let issued = engine
+            .issue("internal", "CN=svc", "server", None, &[], &[], None)
+            .await
+            .unwrap();
+
+        // Force all keys to Retired state so active_key() returns None,
+        // which makes CRL generation fail with NoActiveKey.
+        engine
+            .cas
+            .update("internal", |ca| {
+                for kv in &mut ca.key_versions {
+                    kv.state = KeyState::Retired;
+                    kv.retired_at = Some(1);
+                    kv.key_material = None;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        // Revoke should fail because CRL generation requires an active key.
+        let err = engine
+            .revoke(
+                "internal",
+                &issued.serial,
+                Some(RevocationReason::Superseded),
+                None,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, ForgeError::NoActiveKey { .. }),
+            "expected NoActiveKey error, got: {err}"
+        );
+
+        // The cert must still be Active — revocation was not committed.
+        let info = engine.inspect("internal", &issued.serial).unwrap();
+        assert_eq!(
+            info.state, "active",
+            "cert should remain active when CRL generation fails"
+        );
     }
 
     #[tokio::test]

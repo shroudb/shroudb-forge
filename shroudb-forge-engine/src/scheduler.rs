@@ -10,6 +10,9 @@ use tokio::sync::watch;
 use crate::engine::ForgeEngine;
 
 /// Start the background scheduler.
+///
+/// If a `CourierOps` capability is configured on the engine, the scheduler
+/// sends notifications on CA rotation events.
 pub fn start_scheduler<S: Store + 'static>(
     engine: Arc<ForgeEngine<S>>,
     interval_secs: u64,
@@ -64,6 +67,21 @@ async fn run_cycle<S: Store>(engine: &ForgeEngine<S>) -> Result<(), String> {
                             new_version = result.key_version,
                             "auto-rotated CA key"
                         );
+                        if let Some(c) = engine.courier()
+                            && let Err(e) = c
+                                .notify(
+                                    "ops",
+                                    "CA key rotated",
+                                    &format!("CA '{}' rotated to v{}", name, result.key_version),
+                                )
+                                .await
+                        {
+                            tracing::warn!(
+                                ca = name,
+                                error = %e,
+                                "failed to send rotation notification"
+                            );
+                        }
                     }
                     Err(e) => {
                         tracing::warn!(ca = name, error = %e, "auto-rotation failed");
