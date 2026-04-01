@@ -1619,7 +1619,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-cli"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -1630,7 +1630,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-client"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -1640,7 +1640,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-core"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
  "hex",
  "pem",
@@ -1657,7 +1657,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-engine"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
  "base64",
  "dashmap",
@@ -1680,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-protocol"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -1696,7 +1696,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-server"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
  "anyhow",
  "axum",
