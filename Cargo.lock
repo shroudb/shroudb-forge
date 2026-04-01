@@ -1600,6 +1600,8 @@ dependencies = [
 [[package]]
 name = "shroudb-courier-core"
 version = "1.4.0"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "0e4b7400738e395b54a7d81c0e4aa140b3e13623b220d08b13788d24ab9fffc1"
 dependencies = [
  "serde",
  "serde_json",
