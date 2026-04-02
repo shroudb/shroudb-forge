@@ -412,6 +412,31 @@ mod tests {
         assert_eq!(issued.serial.len(), 40);
     }
 
+    mod fuzz {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            // Arbitrary strings must never panic parse_subject.
+            #[test]
+            fn parse_subject_never_panics(s in "\\PC*") {
+                let _ = parse_subject(&s);
+            }
+
+            // A well-formed "CN=<value>" input always produces a non-empty DistinguishedName.
+            #[test]
+            fn valid_dn_roundtrip(cn in "[a-zA-Z0-9 ]{1,64}") {
+                let input = format!("CN={cn}");
+                let dn = parse_subject(&input);
+                // DistinguishedName doesn't expose a len/is_empty, but its Debug
+                // output will contain the CN value if it was parsed correctly.
+                let debug = format!("{dn:?}");
+                assert!(debug.contains(&cn.trim().to_string()),
+                    "DistinguishedName should contain the CN value");
+            }
+        }
+    }
+
     #[test]
     fn generate_intermediate_ca() {
         let root =

@@ -52,4 +52,39 @@ mod tests {
         assert!(validate_name("has.dot").is_err());
         assert!(validate_name("has/slash").is_err());
     }
+
+    mod fuzz {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            // Any arbitrary string input must never panic validate_name.
+            #[test]
+            fn arbitrary_string_never_panics(s in "\\PC*") {
+                let _ = validate_name(&s);
+            }
+
+            // Names matching the allowed alphabet should always be accepted.
+            #[test]
+            fn valid_alphabet_names_accepted(s in "[a-zA-Z0-9_-]{1,100}") {
+                validate_name(&s).expect("valid alphabet name should be accepted");
+            }
+
+            // Names exceeding 255 chars must always be rejected.
+            #[test]
+            fn oversized_names_rejected(s in "[a-zA-Z0-9_-]{256,512}") {
+                validate_name(&s).expect_err("oversized name should be rejected");
+            }
+
+            // Any name that validate_name accepts must have only allowed chars and length <= 255.
+            #[test]
+            fn accepted_names_are_safe(s in "\\PC{1,300}") {
+                if validate_name(&s).is_ok() {
+                    assert!(s.len() <= 255);
+                    assert!(!s.is_empty());
+                    assert!(s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+                }
+            }
+        }
+    }
 }
