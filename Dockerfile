@@ -22,6 +22,7 @@ RUN --mount=type=secret,id=registry_token \
 # --- shroudb-forge: internal certificate authority engine ---
 FROM alpine:3.21 AS shroudb-forge
 RUN adduser -D -u 65532 shroudb && \
+    apk add --no-cache su-exec && \
     mkdir /data && chown shroudb:shroudb /data
 LABEL org.opencontainers.image.title="ShrouDB Forge" \
       org.opencontainers.image.description="Internal certificate authority with CA lifecycle management" \
@@ -30,11 +31,13 @@ LABEL org.opencontainers.image.title="ShrouDB Forge" \
       org.opencontainers.image.source="https://github.com/shroudb/shroudb-forge" \
       org.opencontainers.image.licenses="MIT OR Apache-2.0"
 COPY --from=builder /out/shroudb-forge /shroudb-forge
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 VOLUME /data
 WORKDIR /data
-USER shroudb
 EXPOSE 6699 6700
-ENTRYPOINT ["/shroudb-forge"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["/shroudb-forge"]
 
 # --- shroudb-forge-cli: CLI tool ---
 FROM alpine:3.21 AS shroudb-forge-cli
