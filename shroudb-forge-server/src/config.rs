@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use serde::Deserialize;
+use shroudb_acl::ServerAuthConfig;
 
 #[derive(Debug, Deserialize, Default)]
 pub struct ForgeServerConfig {
@@ -13,7 +14,7 @@ pub struct ForgeServerConfig {
     #[serde(default)]
     pub engine: EngineConfig,
     #[serde(default)]
-    pub auth: AuthConfig,
+    pub auth: ServerAuthConfig,
     #[serde(default)]
     pub cas: HashMap<String, CaConfig>,
     #[serde(default)]
@@ -115,36 +116,6 @@ fn default_scheduler_interval() -> u64 {
     3600
 }
 
-#[derive(Debug, Deserialize, Default)]
-pub struct AuthConfig {
-    #[serde(default)]
-    pub method: Option<String>,
-    #[serde(default)]
-    pub tokens: HashMap<String, TokenConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct TokenConfig {
-    pub tenant: String,
-    #[serde(default = "default_actor")]
-    pub actor: String,
-    #[serde(default)]
-    pub platform: bool,
-    #[serde(default)]
-    pub grants: Vec<GrantConfig>,
-}
-
-fn default_actor() -> String {
-    "anonymous".to_string()
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct GrantConfig {
-    pub namespace: String,
-    #[serde(default)]
-    pub scopes: Vec<String>,
-}
-
 /// Config-defined CA to seed on startup.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CaConfig {
@@ -219,51 +190,6 @@ pub fn to_profile(
         allow_san_ip: cfg.allow_san_ip,
         subject_template: cfg.subject_template.clone(),
     }
-}
-
-/// Build a StaticTokenValidator from the auth config.
-pub fn build_token_validator(
-    config: &AuthConfig,
-) -> Option<std::sync::Arc<dyn shroudb_acl::TokenValidator>> {
-    if config.method.as_deref() != Some("token") || config.tokens.is_empty() {
-        return None;
-    }
-
-    let mut validator = shroudb_acl::StaticTokenValidator::new();
-
-    for (raw_token, token_config) in &config.tokens {
-        let grants: Vec<shroudb_acl::TokenGrant> = token_config
-            .grants
-            .iter()
-            .map(|g| {
-                let scopes: Vec<shroudb_acl::Scope> = g
-                    .scopes
-                    .iter()
-                    .filter_map(|s| match s.to_lowercase().as_str() {
-                        "read" => Some(shroudb_acl::Scope::Read),
-                        "write" => Some(shroudb_acl::Scope::Write),
-                        _ => None,
-                    })
-                    .collect();
-                shroudb_acl::TokenGrant {
-                    namespace: g.namespace.clone(),
-                    scopes,
-                }
-            })
-            .collect();
-
-        let token = shroudb_acl::Token {
-            tenant: token_config.tenant.clone(),
-            actor: token_config.actor.clone(),
-            is_platform: token_config.platform,
-            grants,
-            expires_at: None,
-        };
-
-        validator.register(raw_token.clone(), token);
-    }
-
-    Some(std::sync::Arc::new(validator))
 }
 
 /// Load config from a TOML file, or return defaults.
