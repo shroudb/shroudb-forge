@@ -229,6 +229,25 @@ response = { certificate_pem = "string", private_key_pem = "string", serial = "s
 acl = "namespace_write"
 acl_namespace = "forge.{ca}.*"
 
+[commands.CONFIG_GET]
+syntax = "CONFIG GET <key>"
+description = "Get a runtime configuration value"
+parameters = [
+    { name = "key", type = "string", required = true, description = "Configuration key" },
+]
+response = { status = "string", key = "string", value = "any" }
+acl = "none"
+
+[commands.CONFIG_SET]
+syntax = "CONFIG SET <key> <value>"
+description = "Set a runtime configuration value (only scheduler_interval_secs is mutable)"
+parameters = [
+    { name = "key", type = "string", required = true, description = "Configuration key" },
+    { name = "value", type = "string", required = true, description = "New value" },
+]
+response = { status = "string", key = "string", value = "string" }
+acl = "admin"
+
 # ─── HTTP Endpoints ───────────────────────────────────────────────────────────
 
 [http_endpoints]

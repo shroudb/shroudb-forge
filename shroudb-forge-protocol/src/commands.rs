@@ -68,6 +68,15 @@ pub enum ForgeCommand {
         ttl: Option<String>,
     },
 
+    // Configuration
+    ConfigGet {
+        key: String,
+    },
+    ConfigSet {
+        key: String,
+        value: String,
+    },
+
     // Operational
     Health,
     Ping,
@@ -88,7 +97,11 @@ impl ForgeCommand {
             // Structural changes → admin
             ForgeCommand::CaCreate { .. }
             | ForgeCommand::CaRotate { .. }
-            | ForgeCommand::RegenerateCrl { .. } => AclRequirement::Admin,
+            | ForgeCommand::RegenerateCrl { .. }
+            | ForgeCommand::ConfigSet { .. } => AclRequirement::Admin,
+
+            // Config read → none (operational)
+            ForgeCommand::ConfigGet { .. } => AclRequirement::None,
 
             // Read operations
             ForgeCommand::CaInfo { ca, .. }
@@ -150,6 +163,7 @@ pub fn parse_command(args: &[&str]) -> Result<ForgeCommand, String> {
                 ca: args[1].to_string(),
             })
         }
+        "CONFIG" => parse_config(args),
         "HEALTH" => Ok(ForgeCommand::Health),
         "PING" => Ok(ForgeCommand::Ping),
         "COMMAND" => Ok(ForgeCommand::CommandList),
@@ -318,6 +332,32 @@ fn parse_renew(args: &[&str]) -> Result<ForgeCommand, String> {
         serial: args[2].to_string(),
         ttl,
     })
+}
+
+fn parse_config(args: &[&str]) -> Result<ForgeCommand, String> {
+    if args.len() < 2 {
+        return Err("CONFIG requires a subcommand (GET, SET)".into());
+    }
+    match args[1].to_uppercase().as_str() {
+        "GET" => {
+            if args.len() < 3 {
+                return Err("CONFIG GET <key>".into());
+            }
+            Ok(ForgeCommand::ConfigGet {
+                key: args[2].to_string(),
+            })
+        }
+        "SET" => {
+            if args.len() < 4 {
+                return Err("CONFIG SET <key> <value>".into());
+            }
+            Ok(ForgeCommand::ConfigSet {
+                key: args[2].to_string(),
+                value: args[3].to_string(),
+            })
+        }
+        sub => Err(format!("unknown CONFIG subcommand: {sub}")),
+    }
 }
 
 /// Find an optional keyword argument: `KEY value` in the args list.
@@ -645,5 +685,56 @@ mod tests {
     #[test]
     fn regenerate_crl_missing_ca_errors() {
         assert!(parse_command(&["REGENERATE_CRL"]).is_err());
+    }
+
+    #[test]
+    fn parse_config_get() {
+        let cmd = parse_command(&["CONFIG", "GET", "scheduler_interval_secs"]).unwrap();
+        assert!(matches!(cmd, ForgeCommand::ConfigGet { key } if key == "scheduler_interval_secs"));
+    }
+
+    #[test]
+    fn parse_config_set() {
+        let cmd = parse_command(&["CONFIG", "SET", "scheduler_interval_secs", "1800"]).unwrap();
+        assert!(
+            matches!(cmd, ForgeCommand::ConfigSet { key, value } if key == "scheduler_interval_secs" && value == "1800")
+        );
+    }
+
+    #[test]
+    fn parse_config_missing_subcommand() {
+        assert!(parse_command(&["CONFIG"]).is_err());
+    }
+
+    #[test]
+    fn parse_config_get_missing_key() {
+        assert!(parse_command(&["CONFIG", "GET"]).is_err());
+    }
+
+    #[test]
+    fn parse_config_set_missing_value() {
+        assert!(parse_command(&["CONFIG", "SET", "key"]).is_err());
+    }
+
+    #[test]
+    fn parse_config_unknown_subcommand() {
+        assert!(parse_command(&["CONFIG", "DELETE", "key"]).is_err());
+    }
+
+    #[test]
+    fn acl_config_get_is_public() {
+        let cmd = ForgeCommand::ConfigGet {
+            key: "scheduler_interval_secs".into(),
+        };
+        assert_eq!(cmd.acl_requirement(), AclRequirement::None);
+    }
+
+    #[test]
+    fn acl_config_set_is_admin() {
+        let cmd = ForgeCommand::ConfigSet {
+            key: "scheduler_interval_secs".into(),
+            value: "1800".into(),
+        };
+        assert_eq!(cmd.acl_requirement(), AclRequirement::Admin);
     }
 }

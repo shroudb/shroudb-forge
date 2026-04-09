@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use shroudb_acl::{PolicyEffect, PolicyEvaluator, PolicyPrincipal, PolicyRequest, PolicyResource};
@@ -24,6 +25,8 @@ pub struct ForgeConfig {
     pub default_drain_days: u32,
     pub default_ca_ttl_days: u32,
     pub scheduler_interval_secs: u64,
+    /// Policy enforcement mode. Default: fail-closed.
+    pub policy_mode: PolicyMode,
 }
 
 impl Default for ForgeConfig {
@@ -33,6 +36,7 @@ impl Default for ForgeConfig {
             default_drain_days: 90,
             default_ca_ttl_days: 3650,
             scheduler_interval_secs: 3600,
+            policy_mode: PolicyMode::default(),
         }
     }
 }
@@ -97,6 +101,17 @@ pub struct CertInfoResult {
     pub certificate_pem: String,
 }
 
+/// Policy enforcement mode for engine-level ABAC checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PolicyMode {
+    /// Fail-closed: if no PolicyEvaluator is configured, deny all operations.
+    #[default]
+    Closed,
+    /// Explicit opt-in to permissive mode: if no PolicyEvaluator is configured,
+    /// allow all operations. Only appropriate for development/testing.
+    Open,
+}
+
 /// The Forge certificate authority engine.
 pub struct ForgeEngine<S: Store> {
     pub(crate) cas: CaManager<S>,
@@ -107,6 +122,8 @@ pub struct ForgeEngine<S: Store> {
     chronicle: Option<Arc<dyn ChronicleOps>>,
     keep: Option<Box<dyn ForgeKeepOps>>,
     courier: Option<Arc<dyn CourierOps>>,
+    /// Runtime-configurable scheduler interval (seconds). Updated via CONFIG SET.
+    scheduler_interval: AtomicU64,
 }
 
 impl<S: Store> ForgeEngine<S> {
@@ -118,26 +135,16 @@ impl<S: Store> ForgeEngine<S> {
         chronicle: Option<Arc<dyn ChronicleOps>>,
         keep: Option<Box<dyn ForgeKeepOps>>,
     ) -> Result<Self, ForgeError> {
-        let cas = CaManager::new(store.clone());
-        cas.init().await?;
-
-        let certs = CertManager::new(store);
-
-        // Initialize cert namespaces for all loaded CAs
-        for name in cas.list() {
-            certs.init_for_ca(&name).await?;
-        }
-
-        Ok(Self {
-            cas,
-            certs,
+        Self::new_with_capabilities(
+            store,
             profiles,
             config,
             policy_evaluator,
             chronicle,
             keep,
-            courier: None,
-        })
+            None,
+        )
+        .await
     }
 
     /// Create a new Forge engine with all capability traits.
@@ -159,6 +166,8 @@ impl<S: Store> ForgeEngine<S> {
             certs.init_for_ca(&name).await?;
         }
 
+        let scheduler_interval = AtomicU64::new(config.scheduler_interval_secs);
+
         Ok(Self {
             cas,
             certs,
@@ -168,12 +177,59 @@ impl<S: Store> ForgeEngine<S> {
             chronicle,
             keep,
             courier,
+            scheduler_interval,
         })
     }
 
     /// Access the courier capability (if configured).
     pub fn courier(&self) -> Option<&Arc<dyn CourierOps>> {
         self.courier.as_ref()
+    }
+
+    /// Current scheduler interval in seconds. Read by the scheduler each cycle.
+    pub fn scheduler_interval_secs(&self) -> u64 {
+        self.scheduler_interval.load(Ordering::Relaxed)
+    }
+
+    /// Get a configuration value by key.
+    pub fn config_get(&self, key: &str) -> Result<serde_json::Value, ForgeError> {
+        match key {
+            "scheduler_interval_secs" => Ok(serde_json::json!(self.scheduler_interval_secs())),
+            "default_rotation_days" => Ok(serde_json::json!(self.config.default_rotation_days)),
+            "default_drain_days" => Ok(serde_json::json!(self.config.default_drain_days)),
+            "default_ca_ttl_days" => Ok(serde_json::json!(self.config.default_ca_ttl_days)),
+            _ => Err(ForgeError::InvalidArgument(format!(
+                "unknown config key: {key}"
+            ))),
+        }
+    }
+
+    /// Set a configuration value by key. Only `scheduler_interval_secs` is
+    /// runtime-configurable; other keys are read-only.
+    pub fn config_set(&self, key: &str, value: &str) -> Result<(), ForgeError> {
+        match key {
+            "scheduler_interval_secs" => {
+                let secs: u64 = value.parse().map_err(|_| {
+                    ForgeError::InvalidArgument(format!(
+                        "scheduler_interval_secs must be a positive integer, got: {value}"
+                    ))
+                })?;
+                if secs == 0 {
+                    return Err(ForgeError::InvalidArgument(
+                        "scheduler_interval_secs must be > 0".into(),
+                    ));
+                }
+                self.scheduler_interval.store(secs, Ordering::Relaxed);
+                tracing::info!(key, value, "config updated");
+                Ok(())
+            }
+            "default_rotation_days" | "default_drain_days" | "default_ca_ttl_days" => Err(
+                ForgeError::InvalidArgument(format!("{key} is read-only at runtime")),
+            ),
+            _ => Err(ForgeError::InvalidArgument(format!(
+                "unknown config key: {key}"
+            ))),
+        }
     }
 
     /// Emit an audit event to Chronicle. Fail-closed for security-critical
@@ -210,7 +266,14 @@ impl<S: Store> ForgeEngine<S> {
         actor: Option<&str>,
     ) -> Result<(), ForgeError> {
         let Some(evaluator) = &self.policy_evaluator else {
-            return Ok(());
+            if self.config.policy_mode == PolicyMode::Open {
+                return Ok(());
+            }
+            return Err(ForgeError::PolicyDenied {
+                action: action.to_string(),
+                resource: resource_id.to_string(),
+                policy: "no policy evaluator configured (fail-closed)".to_string(),
+            });
         };
         let request = PolicyRequest {
             principal: PolicyPrincipal {
@@ -838,16 +901,13 @@ mod tests {
 
     async fn setup() -> ForgeEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("forge-test").await;
-        ForgeEngine::new(
-            store,
-            test_profiles(),
-            ForgeConfig::default(),
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap()
+        let config = ForgeConfig {
+            policy_mode: PolicyMode::Open,
+            ..Default::default()
+        };
+        ForgeEngine::new(store, test_profiles(), config, None, None, None)
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
@@ -1228,13 +1288,18 @@ mod tests {
         keep: Box<dyn ForgeKeepOps>,
     ) -> ForgeEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("forge-test").await;
-        ForgeEngine::new(
+        let config = ForgeConfig {
+            policy_mode: PolicyMode::Open,
+            ..Default::default()
+        };
+        ForgeEngine::new_with_capabilities(
             store,
             test_profiles(),
-            ForgeConfig::default(),
+            config,
             None,
             None,
             Some(keep),
+            None,
         )
         .await
         .unwrap()
@@ -1395,5 +1460,70 @@ mod tests {
         // Verify CA state is consistent — all certs are listed.
         let certs = engine.list_certs("concurrent-ca", None, None, None);
         assert_eq!(certs.len(), 5, "CA must list all 5 issued certs");
+    }
+
+    // ── Policy mode tests (MED-19) ──────────────────────────────────
+
+    #[tokio::test]
+    async fn no_evaluator_default_closed_denies() {
+        let store = shroudb_storage::test_util::create_test_store("forge-closed-test").await;
+        // Default PolicyMode::Closed, no evaluator
+        let engine = ForgeEngine::new(
+            store,
+            test_profiles(),
+            ForgeConfig::default(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let err = engine
+            .ca_create(
+                "test-ca",
+                CaAlgorithm::EcdsaP256,
+                CaCreateOpts {
+                    subject: "CN=Test".into(),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await;
+        assert!(err.is_err(), "fail-closed should deny without evaluator");
+        let msg = err.unwrap_err().to_string();
+        assert!(
+            msg.contains("no policy evaluator configured"),
+            "expected fail-closed message, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_open_mode_permits() {
+        let store = shroudb_storage::test_util::create_test_store("forge-open-test").await;
+        let config = ForgeConfig {
+            policy_mode: PolicyMode::Open,
+            ..Default::default()
+        };
+        let engine = ForgeEngine::new(store, test_profiles(), config, None, None, None)
+            .await
+            .unwrap();
+
+        let result = engine
+            .ca_create(
+                "open-ca",
+                CaAlgorithm::EcdsaP256,
+                CaCreateOpts {
+                    subject: "CN=Open".into(),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await;
+        assert!(
+            result.is_ok(),
+            "open mode should allow: {}",
+            result.unwrap_err()
+        );
     }
 }

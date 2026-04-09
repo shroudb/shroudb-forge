@@ -17,6 +17,8 @@ const SUPPORTED_COMMANDS: &[&str] = &[
     "CA EXPORT",
     "CA REGENERATE_CRL",
     "REGENERATE_CRL",
+    "CONFIG GET",
+    "CONFIG SET",
     "ISSUE",
     "ISSUE_FROM_CSR",
     "REVOKE",
@@ -286,6 +288,25 @@ pub async fn dispatch<S: Store>(
             Err(e) => ForgeResponse::error(e.to_string()),
         },
 
+        // ── Configuration ─────────────────────────────────────────
+        ForgeCommand::ConfigGet { key } => match engine.config_get(&key) {
+            Ok(value) => ForgeResponse::ok(serde_json::json!({
+                "status": "ok",
+                "key": key,
+                "value": value,
+            })),
+            Err(e) => ForgeResponse::error(e.to_string()),
+        },
+
+        ForgeCommand::ConfigSet { key, value } => match engine.config_set(&key, &value) {
+            Ok(()) => ForgeResponse::ok(serde_json::json!({
+                "status": "ok",
+                "key": key,
+                "value": value,
+            })),
+            Err(e) => ForgeResponse::error(e.to_string()),
+        },
+
         // ── Operational ───────────────────────────────────────────
         ForgeCommand::Health => ForgeResponse::ok(serde_json::json!({
             "status": "ok",
@@ -304,20 +325,17 @@ pub async fn dispatch<S: Store>(
 mod tests {
     use super::*;
     use crate::commands::parse_command;
-    use shroudb_forge_engine::engine::ForgeConfig;
+    use shroudb_forge_engine::engine::{ForgeConfig, PolicyMode};
 
     async fn setup() -> ForgeEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("forge-test").await;
-        ForgeEngine::new(
-            store,
-            test_profiles(),
-            ForgeConfig::default(),
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap()
+        let config = ForgeConfig {
+            policy_mode: PolicyMode::Open,
+            ..Default::default()
+        };
+        ForgeEngine::new(store, test_profiles(), config, None, None, None)
+            .await
+            .unwrap()
     }
 
     fn test_profiles() -> Vec<shroudb_forge_core::profile::CertificateProfile> {
@@ -577,5 +595,94 @@ mod tests {
         let cmd = parse_command(&["REGENERATE_CRL", "nope"]).unwrap();
         let resp = dispatch(&engine, cmd, None).await;
         assert!(!resp.is_ok(), "expected error for nonexistent CA");
+    }
+
+    // ── CONFIG GET/SET (LOW-22) ──────────────────────────────────
+
+    #[tokio::test]
+    async fn config_get_scheduler_interval() {
+        let engine = setup().await;
+
+        let cmd = parse_command(&["CONFIG", "GET", "scheduler_interval_secs"]).unwrap();
+        let resp = dispatch(&engine, cmd, None).await;
+        assert!(resp.is_ok(), "CONFIG GET failed: {resp:?}");
+
+        match &resp {
+            ForgeResponse::Ok(v) => {
+                assert_eq!(v["key"], "scheduler_interval_secs");
+                assert_eq!(v["value"], 3600); // default
+            }
+            _ => panic!("expected ok"),
+        }
+    }
+
+    #[tokio::test]
+    async fn config_set_scheduler_interval() {
+        let engine = setup().await;
+
+        // SET
+        let cmd = parse_command(&["CONFIG", "SET", "scheduler_interval_secs", "1800"]).unwrap();
+        let resp = dispatch(&engine, cmd, None).await;
+        assert!(resp.is_ok(), "CONFIG SET failed: {resp:?}");
+
+        // Verify with GET
+        let cmd = parse_command(&["CONFIG", "GET", "scheduler_interval_secs"]).unwrap();
+        let resp = dispatch(&engine, cmd, None).await;
+        match &resp {
+            ForgeResponse::Ok(v) => assert_eq!(v["value"], 1800),
+            _ => panic!("expected ok"),
+        }
+    }
+
+    #[tokio::test]
+    async fn config_set_invalid_value() {
+        let engine = setup().await;
+
+        let cmd =
+            parse_command(&["CONFIG", "SET", "scheduler_interval_secs", "not-a-number"]).unwrap();
+        let resp = dispatch(&engine, cmd, None).await;
+        assert!(!resp.is_ok(), "expected error for non-numeric value");
+    }
+
+    #[tokio::test]
+    async fn config_set_zero_rejected() {
+        let engine = setup().await;
+
+        let cmd = parse_command(&["CONFIG", "SET", "scheduler_interval_secs", "0"]).unwrap();
+        let resp = dispatch(&engine, cmd, None).await;
+        assert!(!resp.is_ok(), "expected error for zero value");
+    }
+
+    #[tokio::test]
+    async fn config_get_unknown_key() {
+        let engine = setup().await;
+
+        let cmd = parse_command(&["CONFIG", "GET", "nonexistent"]).unwrap();
+        let resp = dispatch(&engine, cmd, None).await;
+        assert!(!resp.is_ok(), "expected error for unknown key");
+    }
+
+    #[tokio::test]
+    async fn config_set_readonly_key() {
+        let engine = setup().await;
+
+        let cmd = parse_command(&["CONFIG", "SET", "default_rotation_days", "180"]).unwrap();
+        let resp = dispatch(&engine, cmd, None).await;
+        assert!(!resp.is_ok(), "expected error for read-only key");
+    }
+
+    #[tokio::test]
+    async fn config_get_readonly_keys() {
+        let engine = setup().await;
+
+        for key in [
+            "default_rotation_days",
+            "default_drain_days",
+            "default_ca_ttl_days",
+        ] {
+            let cmd = parse_command(&["CONFIG", "GET", key]).unwrap();
+            let resp = dispatch(&engine, cmd, None).await;
+            assert!(resp.is_ok(), "CONFIG GET {key} should succeed");
+        }
     }
 }

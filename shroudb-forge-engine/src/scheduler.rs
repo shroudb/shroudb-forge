@@ -18,10 +18,14 @@ pub fn start_scheduler<S: Store + 'static>(
     interval_secs: u64,
     mut shutdown: watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
+    // Use the initial value; each subsequent cycle reads from the engine
+    // so CONFIG SET scheduler_interval_secs takes effect on the next sleep.
+    let _ = interval_secs;
     tokio::spawn(async move {
         loop {
+            let secs = engine.scheduler_interval_secs();
             tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
+                _ = tokio::time::sleep(Duration::from_secs(secs)) => {
                     if let Err(e) = run_cycle(&engine).await {
                         tracing::warn!(error = %e, "scheduler cycle failed");
                     }
