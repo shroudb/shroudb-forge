@@ -145,7 +145,9 @@ impl Drop for TestServer {
 
 fn generate_config(tcp_bind: &str, http_bind: &str, config: &TestServerConfig) -> String {
     let mut toml = format!(
-        r#"[server]
+        r#"policy_mode = "open"
+
+[server]
 tcp_bind = "{tcp_bind}"
 http_bind = "{http_bind}"
 

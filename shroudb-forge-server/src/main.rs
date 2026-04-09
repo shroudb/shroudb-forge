@@ -83,11 +83,16 @@ async fn main() -> anyhow::Result<()> {
         .collect();
 
     // Forge engine
-    let forge_config = ForgeConfig {
+    let mut forge_config = ForgeConfig {
         default_rotation_days: cfg.engine.default_rotation_days,
         default_drain_days: cfg.engine.default_drain_days,
         default_ca_ttl_days: cfg.engine.default_ca_ttl_days,
         scheduler_interval_secs: cfg.engine.scheduler_interval_secs,
+        ..Default::default()
+    };
+    forge_config.policy_mode = match cfg.policy_mode.as_str() {
+        "open" => shroudb_forge_engine::engine::PolicyMode::Open,
+        _ => shroudb_forge_engine::engine::PolicyMode::Closed,
     };
     let engine = Arc::new(
         ForgeEngine::new(store, profiles, forge_config, None, None, None)

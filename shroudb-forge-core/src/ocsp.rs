@@ -1039,4 +1039,89 @@ mod tests {
         assert!(!response.is_empty());
         assert_eq!(response[0], 0x30);
     }
+
+    // ── Fuzz tests ───────────────────────────────────────────────────
+
+    mod fuzz {
+        use super::*;
+        use proptest::prelude::*;
+
+        // Arbitrary bytes never cause parse_ocsp_request to panic.
+        proptest! {
+            #[test]
+            fn parse_ocsp_request_never_panics(data in proptest::collection::vec(any::<u8>(), 0..1024)) {
+                let _ = parse_ocsp_request(&data);
+            }
+        }
+
+        // Arbitrary bytes never cause parse_tlv to panic.
+        proptest! {
+            #[test]
+            fn parse_tlv_never_panics(data in proptest::collection::vec(any::<u8>(), 0..512)) {
+                let _ = parse_tlv(&data);
+            }
+        }
+
+        // Arbitrary bytes never cause parse_der_length to panic.
+        proptest! {
+            #[test]
+            fn parse_der_length_never_panics(data in proptest::collection::vec(any::<u8>(), 0..256)) {
+                let _ = parse_der_length(&data);
+            }
+        }
+
+        // Empty input is rejected cleanly.
+        proptest! {
+            #[test]
+            fn empty_inputs_rejected(_dummy in 0..1u8) {
+                assert!(parse_ocsp_request(&[]).is_err());
+                assert!(parse_tlv(&[]).is_err());
+                assert!(parse_der_length(&[]).is_err());
+            }
+        }
+
+        // Truncated DER structures are rejected, not panicking.
+        proptest! {
+            #[test]
+            fn truncated_der_rejected(
+                tag in any::<u8>(),
+                length in 1u8..255,
+                data_len in 0usize..10,
+            ) {
+                // Build a TLV header claiming more bytes than provided
+                let claimed_len = length as usize + data_len + 10; // always exceeds actual
+                let mut input = vec![tag];
+                if claimed_len < 128 {
+                    input.push(claimed_len as u8);
+                } else {
+                    input.push(0x81);
+                    input.push(claimed_len as u8);
+                }
+                // Add fewer bytes than claimed
+                input.extend_from_slice(&vec![0u8; data_len]);
+
+                let result = parse_tlv(&input);
+                // Should either succeed (if coincidentally valid) or error — never panic
+                let _ = result;
+            }
+        }
+
+        // Valid-looking but semantically wrong SEQUENCE wrappers don't panic.
+        proptest! {
+            #[test]
+            fn malformed_sequence_wrapper_rejected(inner in proptest::collection::vec(any::<u8>(), 0..200)) {
+                // Wrap in a SEQUENCE tag (0x30) with correct length
+                let mut data = vec![0x30];
+                if inner.len() < 128 {
+                    data.push(inner.len() as u8);
+                } else {
+                    data.push(0x81);
+                    data.push(inner.len() as u8);
+                }
+                data.extend_from_slice(&inner);
+
+                let _ = parse_ocsp_request(&data);
+            }
+        }
+    }
 }

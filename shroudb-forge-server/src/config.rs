@@ -19,6 +19,14 @@ pub struct ForgeServerConfig {
     pub cas: HashMap<String, CaConfig>,
     #[serde(default)]
     pub profiles: HashMap<String, ProfileConfig>,
+    /// Policy enforcement mode. Default is "closed" (deny when no evaluator).
+    /// Set to "open" only for development/testing.
+    #[serde(default = "default_policy_mode")]
+    pub policy_mode: String,
+}
+
+fn default_policy_mode() -> String {
+    "closed".into()
 }
 
 #[derive(Debug, Deserialize)]

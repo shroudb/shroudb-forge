@@ -248,6 +248,7 @@ impl<S: Store> ForgeEngine<S> {
         let mut event = Event::new(
             AuditEngine::Forge,
             operation.to_string(),
+            "ca".to_string(),
             resource.to_string(),
             result,
             actor.unwrap_or("anonymous").to_string(),
