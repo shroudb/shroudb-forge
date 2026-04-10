@@ -294,12 +294,29 @@ fn sign_algorithm(algorithm: CaAlgorithm) -> &'static rcgen::SignatureAlgorithm 
         CaAlgorithm::EcdsaP256 => &rcgen::PKCS_ECDSA_P256_SHA256,
         CaAlgorithm::EcdsaP384 => &rcgen::PKCS_ECDSA_P384_SHA384,
         CaAlgorithm::Ed25519 => &rcgen::PKCS_ED25519,
+        CaAlgorithm::Rsa2048 => &rcgen::PKCS_RSA_SHA256,
+        CaAlgorithm::Rsa3072 => &rcgen::PKCS_RSA_SHA384,
+        CaAlgorithm::Rsa4096 => &rcgen::PKCS_RSA_SHA512,
+    }
+}
+
+fn rsa_key_size(algorithm: CaAlgorithm) -> Option<rcgen::RsaKeySize> {
+    match algorithm {
+        CaAlgorithm::Rsa2048 => Some(rcgen::RsaKeySize::_2048),
+        CaAlgorithm::Rsa3072 => Some(rcgen::RsaKeySize::_3072),
+        CaAlgorithm::Rsa4096 => Some(rcgen::RsaKeySize::_4096),
+        _ => None,
     }
 }
 
 fn generate_key_pair(algorithm: CaAlgorithm) -> Result<KeyPair, ForgeError> {
-    KeyPair::generate_for(sign_algorithm(algorithm))
-        .map_err(|e| ForgeError::X509Generation(e.to_string()))
+    if let Some(key_size) = rsa_key_size(algorithm) {
+        KeyPair::generate_rsa_for(sign_algorithm(algorithm), key_size)
+            .map_err(|e| ForgeError::X509Generation(e.to_string()))
+    } else {
+        KeyPair::generate_for(sign_algorithm(algorithm))
+            .map_err(|e| ForgeError::X509Generation(e.to_string()))
+    }
 }
 
 fn reconstruct_ca_params(subject: &str) -> Result<CertificateParams, ForgeError> {
@@ -361,6 +378,19 @@ mod tests {
     }
 
     #[test]
+    fn generate_ca_rsa2048() {
+        let result = generate_ca_certificate("CN=RSA-2048 CA,O=Test", CaAlgorithm::Rsa2048, 365);
+        assert!(result.is_ok());
+        let ca = result.unwrap();
+        assert!(
+            ca.certificate_pem
+                .starts_with("-----BEGIN CERTIFICATE-----")
+        );
+        assert!(!ca.private_key.as_bytes().is_empty());
+        assert!(!ca.public_key.is_empty());
+    }
+
+    #[test]
     fn issue_cert_with_sans() {
         let ca = generate_ca_certificate("CN=Test CA", CaAlgorithm::EcdsaP256, 365).unwrap();
 
@@ -410,6 +440,57 @@ mod tests {
                 .starts_with("-----BEGIN PRIVATE KEY-----")
         );
         assert_eq!(issued.serial.len(), 40);
+    }
+
+    #[test]
+    fn issue_cert_with_rsa_ca() {
+        let ca = generate_ca_certificate("CN=RSA Test CA", CaAlgorithm::Rsa2048, 365).unwrap();
+
+        let ca_kv = CaKeyVersion {
+            version: 1,
+            state: KeyState::Active,
+            key_material: Some(hex::encode(ca.private_key.as_bytes())),
+            public_key: Some(hex::encode(&ca.public_key)),
+            certificate_pem: ca.certificate_pem.clone(),
+            created_at: 0,
+            activated_at: Some(0),
+            draining_since: None,
+            retired_at: None,
+        };
+
+        let profile = CertificateProfile {
+            name: "server".into(),
+            key_usage: vec![KeyUsage::DigitalSignature, KeyUsage::KeyEncipherment],
+            extended_key_usage: vec![ExtendedKeyUsage::ServerAuth],
+            max_ttl_days: 90,
+            default_ttl: "30d".into(),
+            allow_san_dns: true,
+            allow_san_ip: false,
+            subject_template: None,
+        };
+
+        let result = issue_certificate(&IssueCertParams {
+            ca_key_version: &ca_kv,
+            ca_subject: "CN=RSA Test CA",
+            ca_algorithm: CaAlgorithm::Rsa2048,
+            subject: "CN=myservice",
+            profile: &profile,
+            ttl_secs: 86400,
+            san_dns: &["myservice.local".into()],
+            san_ip: &[],
+        });
+        assert!(result.is_ok());
+        let issued = result.unwrap();
+        assert!(
+            issued
+                .certificate_pem
+                .starts_with("-----BEGIN CERTIFICATE-----")
+        );
+        assert!(
+            issued
+                .private_key_pem
+                .starts_with("-----BEGIN PRIVATE KEY-----")
+        );
     }
 
     mod fuzz {

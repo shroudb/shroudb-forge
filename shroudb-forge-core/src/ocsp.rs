@@ -9,7 +9,7 @@
 
 use ring::digest::{self, SHA1_FOR_LEGACY_USE_ONLY, SHA256};
 use ring::rand::SystemRandom;
-use ring::signature::{self, EcdsaKeyPair, Ed25519KeyPair};
+use ring::signature::{self, EcdsaKeyPair, Ed25519KeyPair, RsaKeyPair};
 
 use crate::ca::CaAlgorithm;
 use crate::error::ForgeError;
@@ -144,6 +144,15 @@ const OID_ECDSA_SHA384: &[u8] = &[0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x03
 
 // id-EdDSA ed25519 (1.3.101.112)
 const OID_ED25519: &[u8] = &[0x2B, 0x65, 0x70];
+
+// sha256WithRSAEncryption (1.2.840.113549.1.1.11)
+const OID_RSA_SHA256: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B];
+
+// sha384WithRSAEncryption (1.2.840.113549.1.1.12)
+const OID_RSA_SHA384: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0C];
+
+// sha512WithRSAEncryption (1.2.840.113549.1.1.13)
+const OID_RSA_SHA512: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0D];
 
 // ---------------------------------------------------------------------------
 // OCSP request parsing
@@ -584,6 +593,25 @@ fn sign_response_data(
             let alg_id = der_sequence(&der_oid(OID_ED25519));
             Ok((sig.as_ref().to_vec(), alg_id))
         }
+        CaAlgorithm::Rsa2048 | CaAlgorithm::Rsa3072 | CaAlgorithm::Rsa4096 => {
+            let key = RsaKeyPair::from_pkcs8(ca_key_der)
+                .map_err(|e| ForgeError::OcspResponse(format!("RSA key load: {e}")))?;
+
+            let (padding, oid) = match algorithm {
+                CaAlgorithm::Rsa2048 => (&signature::RSA_PKCS1_SHA256, OID_RSA_SHA256),
+                CaAlgorithm::Rsa3072 => (&signature::RSA_PKCS1_SHA384, OID_RSA_SHA384),
+                CaAlgorithm::Rsa4096 => (&signature::RSA_PKCS1_SHA512, OID_RSA_SHA512),
+                _ => unreachable!(),
+            };
+
+            let mut sig_buf = vec![0u8; key.public().modulus_len()];
+            key.sign(padding, &rng, tbs_der, &mut sig_buf)
+                .map_err(|e| ForgeError::OcspResponse(format!("RSA sign: {e}")))?;
+
+            // RSA AlgorithmIdentifier includes an explicit NULL parameters field.
+            let alg_id = der_sequence(&[der_oid(oid), der_null()].concat());
+            Ok((sig_buf, alg_id))
+        }
     }
 }
 
@@ -957,6 +985,31 @@ mod tests {
             request: &req,
             status: OcspCertStatus::Good,
             algorithm: CaAlgorithm::EcdsaP384,
+            ca_key_der: ca.private_key.as_bytes(),
+            responder_name_der: &subject_der,
+            now: 1_705_321_845,
+        };
+
+        let response = build_ocsp_response(&params).unwrap();
+        assert_eq!(response[0], 0x30);
+    }
+
+    #[test]
+    fn build_response_rsa2048() {
+        let ca = generate_ca_certificate("CN=RSA OCSP CA", CaAlgorithm::Rsa2048, 365).unwrap();
+        let subject_der = extract_issuer_name_der(&ca.certificate_pem).unwrap();
+
+        let req = OcspRequestInfo {
+            hash_algorithm_oid: OID_SHA256.to_vec(),
+            issuer_name_hash: vec![0; 32],
+            issuer_key_hash: vec![0; 32],
+            serial_number: vec![0x42],
+        };
+
+        let params = OcspResponseParams {
+            request: &req,
+            status: OcspCertStatus::Good,
+            algorithm: CaAlgorithm::Rsa2048,
             ca_key_der: ca.private_key.as_bytes(),
             responder_name_der: &subject_der,
             now: 1_705_321_845,

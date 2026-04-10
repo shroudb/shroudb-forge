@@ -1393,6 +1393,7 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75e669e5202259b5314d1ea5397316ad400819437857b90861765f24c4cf80a2"
 dependencies = [
+ "aws-lc-rs",
  "pem",
  "ring",
  "rustls-pki-types",
@@ -1700,9 +1701,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-chronicle-core"
-version = "1.5.0"
+version = "1.6.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "e09c316285d231c5c08b2885781a29d5070de846f7cf109513b5ab5ac19ce27b"
+checksum = "1b5e545c9be92f5c82c65ac5ff50c69ddede7a1780d7c173f956631d4949cb6a"
 dependencies = [
  "serde",
  "serde_json",
@@ -1723,9 +1724,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-core"
-version = "1.4.5"
+version = "1.4.7"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "581ae53884f4c649a18bd0d2c0c034d01fc4d96a20100f526633a2458ed5f946"
+checksum = "c26d2ba5b5769cb308ed17a7370d1d78b0f27f81ce9f0eb3edb46c1cd4e5ab87"
 dependencies = [
  "serde",
  "serde_json",
@@ -1759,7 +1760,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-cli"
-version = "1.5.11"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1770,7 +1771,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-client"
-version = "1.5.11"
+version = "1.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1780,7 +1781,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-core"
-version = "1.5.11"
+version = "1.6.0"
 dependencies = [
  "hex",
  "pem",
@@ -1798,7 +1799,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-engine"
-version = "1.5.11"
+version = "1.6.0"
 dependencies = [
  "base64",
  "dashmap",
@@ -1822,7 +1823,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-protocol"
-version = "1.5.11"
+version = "1.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1838,7 +1839,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-server"
-version = "1.5.11"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "axum",

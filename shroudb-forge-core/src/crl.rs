@@ -26,6 +26,9 @@ pub fn generate_crl_pem(
         CaAlgorithm::EcdsaP256 => &rcgen::PKCS_ECDSA_P256_SHA256,
         CaAlgorithm::EcdsaP384 => &rcgen::PKCS_ECDSA_P384_SHA384,
         CaAlgorithm::Ed25519 => &rcgen::PKCS_ED25519,
+        CaAlgorithm::Rsa2048 => &rcgen::PKCS_RSA_SHA256,
+        CaAlgorithm::Rsa3072 => &rcgen::PKCS_RSA_SHA384,
+        CaAlgorithm::Rsa4096 => &rcgen::PKCS_RSA_SHA512,
     };
 
     let private_key_der = rustls_pki_types::PrivateKeyDer::try_from(ca_key_der.to_vec())
@@ -97,6 +100,22 @@ mod tests {
             ca.private_key.as_bytes(),
             "CN=Test CA,O=Test",
             CaAlgorithm::EcdsaP256,
+            &[],
+        )
+        .unwrap();
+
+        assert!(crl_pem.contains("-----BEGIN X509 CRL-----"));
+    }
+
+    #[test]
+    fn generate_crl_rsa2048() {
+        let ca = crate::x509::generate_ca_certificate("CN=RSA CRL CA", CaAlgorithm::Rsa2048, 365)
+            .unwrap();
+
+        let crl_pem = generate_crl_pem(
+            ca.private_key.as_bytes(),
+            "CN=RSA CRL CA",
+            CaAlgorithm::Rsa2048,
             &[],
         )
         .unwrap();

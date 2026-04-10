@@ -11,6 +11,9 @@ pub enum CaAlgorithm {
     EcdsaP256,
     EcdsaP384,
     Ed25519,
+    Rsa2048,
+    Rsa3072,
+    Rsa4096,
 }
 
 impl CaAlgorithm {
@@ -20,6 +23,9 @@ impl CaAlgorithm {
             "ecdsa-p256" | "ecdsap256" | "p256" | "ecdsa_p256" => Some(CaAlgorithm::EcdsaP256),
             "ecdsa-p384" | "ecdsap384" | "p384" | "ecdsa_p384" => Some(CaAlgorithm::EcdsaP384),
             "ed25519" | "eddsa" => Some(CaAlgorithm::Ed25519),
+            "rsa-2048" | "rsa2048" | "rsa_2048" => Some(CaAlgorithm::Rsa2048),
+            "rsa-3072" | "rsa3072" | "rsa_3072" => Some(CaAlgorithm::Rsa3072),
+            "rsa-4096" | "rsa4096" | "rsa_4096" => Some(CaAlgorithm::Rsa4096),
             _ => None,
         }
     }
@@ -30,6 +36,9 @@ impl CaAlgorithm {
             CaAlgorithm::EcdsaP256 => "ecdsa-p256",
             CaAlgorithm::EcdsaP384 => "ecdsa-p384",
             CaAlgorithm::Ed25519 => "ed25519",
+            CaAlgorithm::Rsa2048 => "rsa-2048",
+            CaAlgorithm::Rsa3072 => "rsa-3072",
+            CaAlgorithm::Rsa4096 => "rsa-4096",
         }
     }
 }
@@ -226,8 +235,35 @@ mod tests {
     }
 
     #[test]
+    fn ca_algorithm_from_config_rsa_variants() {
+        assert_eq!(
+            CaAlgorithm::from_config("rsa-2048"),
+            Some(CaAlgorithm::Rsa2048)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("rsa2048"),
+            Some(CaAlgorithm::Rsa2048)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("rsa_2048"),
+            Some(CaAlgorithm::Rsa2048)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("RSA-2048"),
+            Some(CaAlgorithm::Rsa2048)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("rsa-3072"),
+            Some(CaAlgorithm::Rsa3072)
+        );
+        assert_eq!(
+            CaAlgorithm::from_config("rsa-4096"),
+            Some(CaAlgorithm::Rsa4096)
+        );
+    }
+
+    #[test]
     fn ca_algorithm_from_config_unknown() {
-        assert_eq!(CaAlgorithm::from_config("rsa-2048"), None);
         assert_eq!(CaAlgorithm::from_config(""), None);
         assert_eq!(CaAlgorithm::from_config("bogus"), None);
     }
@@ -242,7 +278,10 @@ mod tests {
             "ed25519".parse::<CaAlgorithm>().unwrap(),
             CaAlgorithm::Ed25519
         );
-        assert!("rsa-4096".parse::<CaAlgorithm>().is_err());
+        assert_eq!(
+            "rsa-4096".parse::<CaAlgorithm>().unwrap(),
+            CaAlgorithm::Rsa4096
+        );
     }
 
     #[test]
@@ -250,12 +289,16 @@ mod tests {
         assert_eq!(CaAlgorithm::EcdsaP256.wire_name(), "ecdsa-p256");
         assert_eq!(CaAlgorithm::EcdsaP384.wire_name(), "ecdsa-p384");
         assert_eq!(CaAlgorithm::Ed25519.wire_name(), "ed25519");
+        assert_eq!(CaAlgorithm::Rsa2048.wire_name(), "rsa-2048");
+        assert_eq!(CaAlgorithm::Rsa3072.wire_name(), "rsa-3072");
+        assert_eq!(CaAlgorithm::Rsa4096.wire_name(), "rsa-4096");
     }
 
     #[test]
     fn ca_algorithm_display() {
         assert_eq!(format!("{}", CaAlgorithm::EcdsaP256), "ecdsa-p256");
         assert_eq!(format!("{}", CaAlgorithm::Ed25519), "ed25519");
+        assert_eq!(format!("{}", CaAlgorithm::Rsa2048), "rsa-2048");
     }
 
     // --- CertificateAuthority methods ---

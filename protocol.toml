@@ -66,7 +66,7 @@ constraints = "1-255 chars, [a-zA-Z0-9_-]"
 [types.algorithm]
 type = "string"
 description = "Signing algorithm"
-values = ["ecdsa-p256", "ecdsa-p384", "ed25519"]
+values = ["ecdsa-p256", "ecdsa-p384", "ed25519", "rsa-2048", "rsa-3072", "rsa-4096"]
 
 [types.subject]
 type = "string"
