@@ -10,8 +10,9 @@ use shroudb_forge_core::ca::CaAlgorithm;
 use shroudb_forge_engine::ca_manager::CaCreateOpts;
 use shroudb_forge_engine::engine::{ForgeConfig, ForgeEngine};
 use shroudb_forge_engine::scheduler;
+use shroudb_store::Store;
 
-use crate::config::load_config;
+use crate::config::{ForgeServerConfig, load_config};
 
 #[derive(Parser)]
 #[command(name = "shroudb-forge", about = "Forge internal certificate authority")]
@@ -61,20 +62,38 @@ async fn main() -> anyhow::Result<()> {
         cfg.server.tcp_bind = bind.parse().context("invalid TCP bind address")?;
     }
 
-    // Store mode validation
-    if cfg.store.mode == "remote" {
-        anyhow::bail!(
-            "remote store mode not yet implemented (uri: {:?})",
-            cfg.store.uri
-        );
+    // Store: embedded or remote
+    match cfg.store.mode.as_str() {
+        "embedded" => {
+            let storage =
+                shroudb_server_bootstrap::open_storage(&cfg.store.data_dir, key_source.as_ref())
+                    .await
+                    .context("failed to open storage engine")?;
+            let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "forge"));
+            run_server(cfg, store).await
+        }
+        "remote" => {
+            let uri = cfg
+                .store
+                .uri
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("remote mode requires store.uri"))?;
+            tracing::info!(uri, "connecting to remote store");
+            let store = Arc::new(
+                shroudb_client::RemoteStore::connect(uri)
+                    .await
+                    .context("failed to connect to remote store")?,
+            );
+            run_server(cfg, store).await
+        }
+        other => anyhow::bail!("unknown store mode: {other}"),
     }
+}
 
-    // Storage engine
-    let storage = shroudb_server_bootstrap::open_storage(&cfg.store.data_dir, key_source.as_ref())
-        .await
-        .context("failed to open storage engine")?;
-    let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "forge"));
-
+async fn run_server<S: Store + 'static>(
+    cfg: ForgeServerConfig,
+    store: Arc<S>,
+) -> anyhow::Result<()> {
     // Build profiles from config
     let profiles: Vec<_> = cfg
         .profiles

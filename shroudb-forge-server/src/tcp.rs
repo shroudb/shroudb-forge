@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -9,13 +10,14 @@ use shroudb_forge_protocol::dispatch::dispatch;
 use shroudb_forge_protocol::response::ForgeResponse;
 use shroudb_protocol_wire::Resp3Frame;
 use shroudb_server_tcp::ServerProtocol;
+use shroudb_store::Store;
 
-pub struct ForgeProtocol;
+pub struct ForgeProtocol<S>(PhantomData<S>);
 
-impl ServerProtocol for ForgeProtocol {
+impl<S: Store + 'static> ServerProtocol for ForgeProtocol<S> {
     type Command = ForgeCommand;
     type Response = ForgeResponse;
-    type Engine = ForgeEngine<shroudb_storage::EmbeddedStore>;
+    type Engine = ForgeEngine<S>;
 
     fn engine_name(&self) -> &str {
         "forge"
@@ -65,9 +67,9 @@ impl ServerProtocol for ForgeProtocol {
     }
 }
 
-pub async fn run_tcp(
+pub async fn run_tcp<S: Store + 'static>(
     listener: tokio::net::TcpListener,
-    engine: Arc<ForgeEngine<shroudb_storage::EmbeddedStore>>,
+    engine: Arc<ForgeEngine<S>>,
     token_validator: Option<Arc<dyn TokenValidator>>,
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
@@ -75,7 +77,7 @@ pub async fn run_tcp(
     shroudb_server_tcp::run_tcp_tls(
         listener,
         engine,
-        Arc::new(ForgeProtocol),
+        Arc::new(ForgeProtocol::<S>(PhantomData)),
         token_validator,
         shutdown_rx,
         tls_acceptor,

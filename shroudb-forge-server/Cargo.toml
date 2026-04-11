@@ -17,6 +17,7 @@ shroudb-forge-protocol = { workspace = true }
 shroudb-acl = { workspace = true }
 shroudb-store = { workspace = true }
 shroudb-storage = { workspace = true }
+shroudb-client = { workspace = true }
 shroudb-protocol-wire = { workspace = true }
 shroudb-server-tcp = { workspace = true }
 shroudb-server-bootstrap = { workspace = true }
