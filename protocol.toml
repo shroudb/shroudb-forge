@@ -103,6 +103,15 @@ values = ["active", "revoked", "expired"]
 
 # ─── Commands ─────────────────────────────────────────────────────────────────
 
+[commands.AUTH]
+syntax = "AUTH <token>"
+description = "Authenticate this connection with a token"
+parameters = [
+    { name = "token", type = "string", required = true },
+]
+response = { status = "string" }
+acl = "none"
+
 [commands.CA_CREATE]
 syntax = "CA CREATE <name> <algorithm> SUBJECT <subject> [TTL_DAYS <n>] [PARENT <ca>]"
 description = "Create a new Certificate Authority"
@@ -152,6 +161,15 @@ parameters = [
 response = { certificate_pem = "string" }
 acl = "namespace_read"
 acl_namespace = "forge.{name}.*"
+
+[commands.REGENERATE_CRL]
+syntax = "REGENERATE_CRL <ca>"
+description = "Force regeneration of the CRL for a CA. Also accepted as `CA REGENERATE_CRL <name>`."
+parameters = [
+    { name = "ca", type = "ca_name", required = true },
+]
+response = { status = "string" }
+acl = "admin"
 
 [commands.ISSUE]
 syntax = "ISSUE <ca> <subject> <profile> [TTL <duration>] [SAN_DNS <name>...] [SAN_IP <ip>...]"
@@ -247,6 +265,24 @@ parameters = [
 ]
 response = { status = "string", key = "string", value = "string" }
 acl = "admin"
+
+[commands.HEALTH]
+syntax = "HEALTH"
+description = "Health check"
+response = { status = "string" }
+acl = "none"
+
+[commands.PING]
+syntax = "PING"
+description = "Liveness probe. Returns PONG."
+response = { status = "string" }
+acl = "none"
+
+[commands.COMMAND]
+syntax = "COMMAND"
+description = "List supported commands"
+response = { commands = "array" }
+acl = "none"
 
 # ─── HTTP Endpoints ───────────────────────────────────────────────────────────
 
