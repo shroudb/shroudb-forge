@@ -211,12 +211,12 @@ let mut client = ForgeClient::connect("127.0.0.1:6699").await?;
 client.ca_create("internal", "ecdsa-p256", "CN=Internal CA,O=Acme", None, None).await?;
 let info = client.ca_info("internal").await?;
 let cas = client.ca_list().await?;
-client.ca_rotate("internal", false, false).await?;
+client.ca_rotate_opts("internal", false, false).await?;
 let ca_pem = client.ca_export("internal").await?;
 
 // Certificate issuance
 let cert = client.issue("internal", "CN=api.svc", "server",
-    Some("24h"), Some(&["api.svc"]), Some(&["10.0.1.5"])).await?;
+    Some("24h"), &["api.svc"], &["10.0.1.5"]).await?;
 println!("cert: {}", cert.certificate_pem);
 println!("key: {}", cert.private_key_pem);
 
