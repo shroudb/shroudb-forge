@@ -284,6 +284,12 @@ description = "List supported commands"
 response = { commands = "array" }
 acl = "none"
 
+[commands.HELLO]
+syntax = "HELLO"
+description = "Engine identity handshake — returns engine name, version, wire protocol, supported commands, and capability tags. Pre-auth; clients issue this on connect to verify they are talking to the expected engine and version."
+response = { engine = "string", version = "string", protocol = "string", commands = "array", capabilities = "array" }
+acl = "none"
+
 # ─── HTTP Endpoints ───────────────────────────────────────────────────────────
 
 [http_endpoints]

@@ -81,6 +81,11 @@ pub enum ForgeCommand {
     Health,
     Ping,
     CommandList,
+    /// Engine identity handshake. Pre-auth; returns engine name, version,
+    /// wire protocol, supported commands, and capability tags so a client
+    /// can detect SDK/engine version mismatches before issuing any real
+    /// command.
+    Hello,
 }
 
 impl ForgeCommand {
@@ -92,6 +97,7 @@ impl ForgeCommand {
             | ForgeCommand::Health
             | ForgeCommand::Ping
             | ForgeCommand::CommandList
+            | ForgeCommand::Hello
             | ForgeCommand::CaList => AclRequirement::None,
 
             // Structural changes → admin
@@ -167,6 +173,7 @@ pub fn parse_command(args: &[&str]) -> Result<ForgeCommand, String> {
         "HEALTH" => Ok(ForgeCommand::Health),
         "PING" => Ok(ForgeCommand::Ping),
         "COMMAND" => Ok(ForgeCommand::CommandList),
+        "HELLO" => Ok(ForgeCommand::Hello),
         _ => Err(format!("unknown command: {}", args[0])),
     }
 }
@@ -642,6 +649,12 @@ mod tests {
     fn parse_command_list() {
         let cmd = parse_command(&["COMMAND"]).unwrap();
         assert!(matches!(cmd, ForgeCommand::CommandList));
+    }
+
+    #[test]
+    fn parse_hello() {
+        let cmd = parse_command(&["HELLO"]).unwrap();
+        assert!(matches!(cmd, ForgeCommand::Hello));
     }
 
     #[test]

@@ -3,6 +3,7 @@ use shroudb_forge_core::ca::CaAlgorithm;
 use shroudb_forge_core::cert::{CertState, RevocationReason};
 use shroudb_forge_engine::ca_manager::CaCreateOpts;
 use shroudb_forge_engine::engine::ForgeEngine;
+use shroudb_protocol_wire::WIRE_PROTOCOL;
 use shroudb_store::Store;
 
 use crate::commands::ForgeCommand;
@@ -28,6 +29,7 @@ const SUPPORTED_COMMANDS: &[&str] = &[
     "HEALTH",
     "PING",
     "COMMAND LIST",
+    "HELLO",
 ];
 
 /// Dispatch a parsed command to the ForgeEngine and produce a response.
@@ -317,6 +319,14 @@ pub async fn dispatch<S: Store>(
         ForgeCommand::CommandList => ForgeResponse::ok(serde_json::json!({
             "count": SUPPORTED_COMMANDS.len(),
             "commands": SUPPORTED_COMMANDS,
+        })),
+
+        ForgeCommand::Hello => ForgeResponse::ok(serde_json::json!({
+            "engine": "forge",
+            "version": env!("CARGO_PKG_VERSION"),
+            "protocol": WIRE_PROTOCOL,
+            "commands": SUPPORTED_COMMANDS,
+            "capabilities": Vec::<&str>::new(),
         })),
     }
 }

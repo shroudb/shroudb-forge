@@ -11,6 +11,7 @@ shroudb-forge-core = { workspace = true }
 shroudb-forge-engine = { workspace = true }
 shroudb-acl = { workspace = true }
 shroudb-store = { workspace = true }
+shroudb-protocol-wire = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
