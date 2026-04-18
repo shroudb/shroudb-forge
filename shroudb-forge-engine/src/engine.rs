@@ -28,6 +28,14 @@ pub struct ForgeConfig {
     pub scheduler_interval_secs: u64,
     /// Policy enforcement mode. Default: fail-closed.
     pub policy_mode: PolicyMode,
+    /// When true, `ForgeEngine::new` rejects construction unless a Keep
+    /// capability is wired (`Capability::Enabled`). Defaults to `true` so
+    /// production deployments fail-closed if the operator forgets to
+    /// configure defense-in-depth for CA private keys. Test harnesses
+    /// that construct the engine with `Capability::DisabledForTests` are
+    /// exempt; only `Capability::DisabledWithJustification` in a
+    /// production build trips the guard.
+    pub require_keep: bool,
 }
 
 impl Default for ForgeConfig {
@@ -38,6 +46,7 @@ impl Default for ForgeConfig {
             default_ca_ttl_days: 3650,
             scheduler_interval_secs: 3600,
             policy_mode: PolicyMode::default(),
+            require_keep: true,
         }
     }
 }

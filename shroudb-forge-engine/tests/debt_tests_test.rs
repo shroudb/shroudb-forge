@@ -387,17 +387,18 @@ fn debt_6_forge_config_must_have_require_keep_defaulting_true() {
 struct ShowConfig<'a>(&'a ForgeConfig);
 impl std::fmt::Debug for ShowConfig<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Render only the fields the test cares about. When require_keep
-        // is added we'll include it here too; until then this string
-        // will lack the key and the assertion will fail by design.
+        // Render only the fields the test cares about, including
+        // `require_keep` so the DEBT-6 ratchet remains honest against
+        // future changes to the default.
         write!(
             f,
-            "ForgeConfig {{ default_rotation_days: {}, default_drain_days: {}, default_ca_ttl_days: {}, scheduler_interval_secs: {}, policy_mode: {:?} }}",
+            "ForgeConfig {{ default_rotation_days: {}, default_drain_days: {}, default_ca_ttl_days: {}, scheduler_interval_secs: {}, policy_mode: {:?}, require_keep: {} }}",
             self.0.default_rotation_days,
             self.0.default_drain_days,
             self.0.default_ca_ttl_days,
             self.0.scheduler_interval_secs,
             self.0.policy_mode,
+            self.0.require_keep,
         )
     }
 }
