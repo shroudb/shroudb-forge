@@ -17,7 +17,7 @@ Rules:
 
 ### Open
 
-- [ ] **DEBT-1** — `main.rs` must not hardcode all three capabilities as None. Test: `debt_1_server_main_must_not_hardcode_capabilities_none` @ `shroudb-forge-engine/tests/debt_tests_test.rs`.
+- [x] **DEBT-1** — `main.rs` must not hardcode all three capabilities as None. Test: `debt_1_server_main_must_not_hardcode_capabilities_none` @ `shroudb-forge-engine/tests/debt_tests_test.rs`.
 - [ ] **DEBT-2** — `ca_create` with Keep configured must clear Store's key_material (Keep becomes sole source). Test: `debt_2_ca_create_with_keep_must_clear_store_key_material` @ same file.
 - [ ] **DEBT-3** — `ca_create` must rollback when Keep store fails (currently half-committed with plaintext in Store). Test: `debt_3_ca_create_must_rollback_when_keep_store_fails` @ same file.
 - [ ] **DEBT-4** — `ca_create` must rollback when audit fails. Test: `debt_4_ca_create_must_rollback_when_audit_fails` @ same file.
