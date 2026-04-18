@@ -13,6 +13,7 @@ use shroudb_forge_core::error::ForgeError;
 use shroudb_forge_core::key_state::KeyState;
 use shroudb_forge_core::profile::CertificateProfile;
 use shroudb_forge_core::x509;
+use shroudb_server_bootstrap::Capability;
 use shroudb_store::Store;
 
 use crate::ca_manager::{CaCreateOpts, CaManager};
@@ -118,22 +119,28 @@ pub struct ForgeEngine<S: Store> {
     pub(crate) certs: CertManager<S>,
     pub(crate) profiles: Vec<CertificateProfile>,
     pub(crate) config: ForgeConfig,
-    policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
-    chronicle: Option<Arc<dyn ChronicleOps>>,
-    keep: Option<Box<dyn ForgeKeepOps>>,
-    courier: Option<Arc<dyn CourierOps>>,
+    policy_evaluator: Capability<Arc<dyn PolicyEvaluator>>,
+    chronicle: Capability<Arc<dyn ChronicleOps>>,
+    keep: Capability<Box<dyn ForgeKeepOps>>,
+    courier: Capability<Arc<dyn CourierOps>>,
     /// Runtime-configurable scheduler interval (seconds). Updated via CONFIG SET.
     scheduler_interval: AtomicU64,
 }
 
 impl<S: Store> ForgeEngine<S> {
+    /// Create a new Forge engine.
+    ///
+    /// Every capability slot is explicit: `Capability::Enabled(...)`,
+    /// `Capability::DisabledForTests`, or
+    /// `Capability::DisabledWithJustification("<reason>")`. Absence is
+    /// never silent — operators must name why they're opting out.
     pub async fn new(
         store: Arc<S>,
         profiles: Vec<CertificateProfile>,
         config: ForgeConfig,
-        policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
-        chronicle: Option<Arc<dyn ChronicleOps>>,
-        keep: Option<Box<dyn ForgeKeepOps>>,
+        policy_evaluator: Capability<Arc<dyn PolicyEvaluator>>,
+        chronicle: Capability<Arc<dyn ChronicleOps>>,
+        keep: Capability<Box<dyn ForgeKeepOps>>,
     ) -> Result<Self, ForgeError> {
         Self::new_with_capabilities(
             store,
@@ -142,7 +149,9 @@ impl<S: Store> ForgeEngine<S> {
             policy_evaluator,
             chronicle,
             keep,
-            None,
+            Capability::disabled(
+                "courier rotation-notify not configured — use new_with_capabilities to wire it",
+            ),
         )
         .await
     }
@@ -152,10 +161,10 @@ impl<S: Store> ForgeEngine<S> {
         store: Arc<S>,
         profiles: Vec<CertificateProfile>,
         config: ForgeConfig,
-        policy_evaluator: Option<Arc<dyn PolicyEvaluator>>,
-        chronicle: Option<Arc<dyn ChronicleOps>>,
-        keep: Option<Box<dyn ForgeKeepOps>>,
-        courier: Option<Arc<dyn CourierOps>>,
+        policy_evaluator: Capability<Arc<dyn PolicyEvaluator>>,
+        chronicle: Capability<Arc<dyn ChronicleOps>>,
+        keep: Capability<Box<dyn ForgeKeepOps>>,
+        courier: Capability<Arc<dyn CourierOps>>,
     ) -> Result<Self, ForgeError> {
         let cas = CaManager::new(store.clone());
         cas.init().await?;
@@ -242,7 +251,7 @@ impl<S: Store> ForgeEngine<S> {
         actor: Option<&str>,
         start: Instant,
     ) -> Result<(), ForgeError> {
-        let Some(chronicle) = &self.chronicle else {
+        let Some(chronicle) = self.chronicle.as_ref() else {
             return Ok(());
         };
         let mut event = Event::new(
@@ -266,7 +275,7 @@ impl<S: Store> ForgeEngine<S> {
         action: &str,
         actor: Option<&str>,
     ) -> Result<(), ForgeError> {
-        let Some(evaluator) = &self.policy_evaluator else {
+        let Some(evaluator) = self.policy_evaluator.as_ref() else {
             if self.config.policy_mode == PolicyMode::Open {
                 return Ok(());
             }
@@ -338,7 +347,7 @@ impl<S: Store> ForgeEngine<S> {
         self.certs.init_for_ca(name).await?;
 
         // Store key material in Keep for defense-in-depth encryption
-        if let Some(ref keep) = self.keep {
+        if let Some(keep) = self.keep.as_ref() {
             let active = ca.active_key().ok_or_else(|| ForgeError::NoActiveKey {
                 ca: name.to_string(),
             })?;
@@ -440,7 +449,7 @@ impl<S: Store> ForgeEngine<S> {
         tracing::info!(ca = name, new_version, previous_version, "CA key rotated");
 
         // Store new key material in Keep for defense-in-depth encryption
-        if let Some(ref keep) = self.keep {
+        if let Some(keep) = self.keep.as_ref() {
             let path = format!("forge/{name}/v{new_version}");
             keep.store_key(&path, generated.private_key.as_bytes())
                 .await?;
@@ -906,9 +915,16 @@ mod tests {
             policy_mode: PolicyMode::Open,
             ..Default::default()
         };
-        ForgeEngine::new(store, test_profiles(), config, None, None, None)
-            .await
-            .unwrap()
+        ForgeEngine::new(
+            store,
+            test_profiles(),
+            config,
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
@@ -1297,10 +1313,10 @@ mod tests {
             store,
             test_profiles(),
             config,
-            None,
-            None,
-            Some(keep),
-            None,
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+            Capability::Enabled(keep),
+            Capability::DisabledForTests,
         )
         .await
         .unwrap()
@@ -1473,9 +1489,9 @@ mod tests {
             store,
             test_profiles(),
             ForgeConfig::default(),
-            None,
-            None,
-            None,
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
         )
         .await
         .unwrap();
@@ -1506,9 +1522,16 @@ mod tests {
             policy_mode: PolicyMode::Open,
             ..Default::default()
         };
-        let engine = ForgeEngine::new(store, test_profiles(), config, None, None, None)
-            .await
-            .unwrap();
+        let engine = ForgeEngine::new(
+            store,
+            test_profiles(),
+            config,
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+        )
+        .await
+        .unwrap();
 
         let result = engine
             .ca_create(

@@ -21,6 +21,7 @@ shroudb-client = { workspace = true }
 shroudb-protocol-wire = { workspace = true }
 shroudb-server-tcp = { workspace = true }
 shroudb-server-bootstrap = { workspace = true }
+shroudb-engine-bootstrap = { workspace = true }
 tokio-rustls = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }

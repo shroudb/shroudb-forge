@@ -336,6 +336,7 @@ mod tests {
     use super::*;
     use crate::commands::parse_command;
     use shroudb_forge_engine::engine::{ForgeConfig, PolicyMode};
+    use shroudb_server_bootstrap::Capability;
 
     async fn setup() -> ForgeEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("forge-test").await;
@@ -343,9 +344,16 @@ mod tests {
             policy_mode: PolicyMode::Open,
             ..Default::default()
         };
-        ForgeEngine::new(store, test_profiles(), config, None, None, None)
-            .await
-            .unwrap()
+        ForgeEngine::new(
+            store,
+            test_profiles(),
+            config,
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+            Capability::DisabledForTests,
+        )
+        .await
+        .unwrap()
     }
 
     fn test_profiles() -> Vec<shroudb_forge_core::profile::CertificateProfile> {

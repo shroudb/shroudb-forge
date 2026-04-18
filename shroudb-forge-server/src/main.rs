@@ -69,8 +69,11 @@ async fn main() -> anyhow::Result<()> {
                 shroudb_server_bootstrap::open_storage(&cfg.store.data_dir, key_source.as_ref())
                     .await
                     .context("failed to open storage engine")?;
-            let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "forge"));
-            run_server(cfg, store).await
+            let store = Arc::new(shroudb_storage::EmbeddedStore::new(
+                storage.clone(),
+                "forge",
+            ));
+            run_server(cfg, store, Some(storage)).await
         }
         "remote" => {
             let uri = cfg
@@ -84,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
                     .await
                     .context("failed to connect to remote store")?,
             );
-            run_server(cfg, store).await
+            run_server(cfg, store, None).await
         }
         other => anyhow::bail!("unknown store mode: {other}"),
     }
@@ -93,7 +96,36 @@ async fn main() -> anyhow::Result<()> {
 async fn run_server<S: Store + 'static>(
     cfg: ForgeServerConfig,
     store: Arc<S>,
+    storage: Option<Arc<shroudb_storage::StorageEngine>>,
 ) -> anyhow::Result<()> {
+    use shroudb_server_bootstrap::Capability;
+
+    // Resolve [audit] and [policy] capabilities — no silent None.
+    let audit_cfg = cfg.audit.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing [audit] config section. Pick one:\n  \
+             [audit] mode = \"remote\" addr = \"chronicle.internal:7300\"\n  \
+             [audit] mode = \"embedded\"\n  \
+             [audit] mode = \"disabled\" justification = \"<reason>\""
+        )
+    })?;
+    let audit_cap = audit_cfg
+        .resolve(storage.clone())
+        .await
+        .context("failed to resolve [audit] capability")?;
+    let policy_cfg = cfg.policy.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing [policy] config section. Pick one:\n  \
+             [policy] mode = \"remote\" addr = \"sentry.internal:7100\"\n  \
+             [policy] mode = \"embedded\"\n  \
+             [policy] mode = \"disabled\" justification = \"<reason>\""
+        )
+    })?;
+    let policy_cap = policy_cfg
+        .resolve(storage.clone(), audit_cap.as_ref().cloned())
+        .await
+        .context("failed to resolve [policy] capability")?;
+
     // Build profiles from config
     let profiles: Vec<_> = cfg
         .profiles
@@ -113,10 +145,26 @@ async fn run_server<S: Store + 'static>(
         "open" => shroudb_forge_engine::engine::PolicyMode::Open,
         _ => shroudb_forge_engine::engine::PolicyMode::Closed,
     };
+
+    // Keep capability at forge-server layer: not yet wired. Forge
+    // optionally persists issued private keys via Keep; standalone deploys
+    // currently can't wire that. Moat is the supported path.
+    let keep_cap =
+        Capability::<Box<dyn shroudb_forge_engine::capabilities::ForgeKeepOps>>::disabled(
+            "forge-server standalone Keep wiring not yet implemented; use Moat for embedded Keep",
+        );
+
     let engine = Arc::new(
-        ForgeEngine::new(store, profiles, forge_config, None, None, None)
-            .await
-            .context("failed to initialize forge engine")?,
+        ForgeEngine::new(
+            store,
+            profiles,
+            forge_config,
+            policy_cap,
+            audit_cap,
+            keep_cap,
+        )
+        .await
+        .context("failed to initialize forge engine")?,
     );
 
     // Seed CAs from config
@@ -229,4 +277,21 @@ async fn run_server<S: Store + 'static>(
     let _ = http_handle.await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_debug_asserts() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn cli_accepts_config_flag() {
+        let parsed = Cli::try_parse_from(["shroudb-forge", "--config", "forge.toml"]).unwrap();
+        assert_eq!(parsed.config.as_deref(), Some("forge.toml"));
+    }
 }

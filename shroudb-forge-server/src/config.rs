@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 use shroudb_acl::ServerAuthConfig;
+use shroudb_engine_bootstrap::{AuditConfig, PolicyConfig};
 
 #[derive(Debug, Deserialize, Default)]
 pub struct ForgeServerConfig {
@@ -23,6 +24,12 @@ pub struct ForgeServerConfig {
     /// Set to "open" only for development/testing.
     #[serde(default = "default_policy_mode")]
     pub policy_mode: String,
+    /// Audit (Chronicle) capability slot. Absent = fail-closed at startup.
+    #[serde(default)]
+    pub audit: Option<AuditConfig>,
+    /// Policy (Sentry) capability slot. Same contract.
+    #[serde(default)]
+    pub policy: Option<PolicyConfig>,
 }
 
 fn default_policy_mode() -> String {

@@ -20,3 +20,4 @@ tracing = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 shroudb-storage = { workspace = true, features = ["testing"] }
 shroudb-crypto = { workspace = true }
+shroudb-server-bootstrap = { workspace = true }
