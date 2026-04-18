@@ -228,6 +228,21 @@ impl<S: Store> CaManager<S> {
         Ok(ca)
     }
 
+    /// Delete a CA: tombstones it in the Store and evicts from the cache.
+    /// Used by the engine's `ca_create` rollback path when a downstream
+    /// capability (Keep, Chronicle) fails after the CA was persisted. The
+    /// Store copy must not survive a half-committed create — it contains
+    /// plaintext CA private key material.
+    pub async fn delete(&self, name: &str) -> Result<(), ForgeError> {
+        match self.store.delete(CAS_NAMESPACE, name.as_bytes()).await {
+            Ok(_) => {}
+            Err(shroudb_store::StoreError::NotFound) => {}
+            Err(e) => return Err(ForgeError::Store(e.to_string())),
+        }
+        self.cache.remove(name);
+        Ok(())
+    }
+
     /// Clear the active key version's plaintext key material in the Store
     /// (and cache). Used after Keep has accepted the material so the
     /// private key lives in exactly one place. Zeroizes the hex string

@@ -379,18 +379,52 @@ impl<S: Store> ForgeEngine<S> {
         // Store key material in Keep for defense-in-depth encryption. When
         // Keep is configured it becomes the sole authoritative holder of
         // the private key — the Store copy is cleared after a successful
-        // write so plaintext hex does not live in two places.
+        // write so plaintext hex does not live in two places. If Keep
+        // fails, the CA is rolled back so the Store does not retain a
+        // half-committed CA with plaintext key material.
         if let Some(keep) = self.keep.as_ref() {
-            let active = ca.active_key().ok_or_else(|| ForgeError::NoActiveKey {
-                ca: name.to_string(),
-            })?;
+            let active = match ca.active_key() {
+                Some(active) => active,
+                None => {
+                    let _ = self.cas.delete(name).await;
+                    return Err(ForgeError::NoActiveKey {
+                        ca: name.to_string(),
+                    });
+                }
+            };
             if let Some(ref km) = active.key_material {
                 let path = format!("forge/{name}/v{}", active.version);
-                keep.store_key(&path, km.as_bytes()).await?;
-                tracing::info!(ca = name, version = active.version, "CA key stored in Keep");
+                match keep.store_key(&path, km.as_bytes()).await {
+                    Ok(_) => {
+                        tracing::info!(
+                            ca = name,
+                            version = active.version,
+                            "CA key stored in Keep"
+                        );
+                    }
+                    Err(e) => {
+                        if let Err(rollback_err) = self.cas.delete(name).await {
+                            tracing::error!(
+                                ca = name,
+                                error = %rollback_err,
+                                "rollback of CA after Keep failure itself failed"
+                            );
+                        }
+                        return Err(e);
+                    }
+                }
             }
             // Keep is now the authoritative holder — clear the Store copy.
-            self.cas.clear_active_key_material(name).await?;
+            if let Err(e) = self.cas.clear_active_key_material(name).await {
+                if let Err(rollback_err) = self.cas.delete(name).await {
+                    tracing::error!(
+                        ca = name,
+                        error = %rollback_err,
+                        "rollback of CA after clear_active_key_material failure itself failed"
+                    );
+                }
+                return Err(e);
+            }
         }
 
         self.emit_audit_event("CA_CREATE", name, EventResult::Ok, actor, start)
