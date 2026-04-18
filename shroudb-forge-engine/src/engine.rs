@@ -331,7 +331,7 @@ impl<S: Store> ForgeEngine<S> {
     ) -> Result<CaInfoResult, ForgeError> {
         let start = Instant::now();
         self.check_policy(name, "ca_create", actor).await?;
-        // Apply config defaults for fields still at their placeholder values
+        // Apply config defaults for fields still at their default values
         let defaults = CaCreateOpts::default();
         if opts.ttl_days == defaults.ttl_days {
             opts.ttl_days = self.config.default_ca_ttl_days;

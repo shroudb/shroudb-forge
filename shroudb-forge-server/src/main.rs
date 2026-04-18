@@ -146,12 +146,14 @@ async fn run_server<S: Store + 'static>(
         _ => shroudb_forge_engine::engine::PolicyMode::Closed,
     };
 
-    // Keep capability at forge-server layer: not yet wired. Forge
-    // optionally persists issued private keys via Keep; standalone deploys
-    // currently can't wire that. Moat is the supported path.
+    // Keep capability at forge-server layer: Forge optionally persists
+    // issued private keys via Keep. The standalone server doesn't expose
+    // a [keep] config section today; embedded Keep is available by
+    // deploying via Moat. The slot is explicit DisabledWithJustification
+    // so operators see the posture at startup.
     let keep_cap =
         Capability::<Box<dyn shroudb_forge_engine::capabilities::ForgeKeepOps>>::disabled(
-            "forge-server standalone Keep wiring not yet implemented; use Moat for embedded Keep",
+            "forge-server standalone deploys use Moat for embedded Keep; direct wiring is follow-up scope",
         );
 
     let engine = Arc::new(
