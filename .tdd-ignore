@@ -1,0 +1,4 @@
+# .tdd-ignore — one ERE pattern per line; # is only a comment at line start.
+# Rust Iterator::skip (pagination). Rust has no test `.skip()` — it uses #[ignore] —
+# so `.skip(` in .rs files is always iterator semantics.
+\.skip\(
