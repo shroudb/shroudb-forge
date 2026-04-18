@@ -427,8 +427,23 @@ impl<S: Store> ForgeEngine<S> {
             }
         }
 
-        self.emit_audit_event("CA_CREATE", name, EventResult::Ok, actor, start)
-            .await?;
+        if let Err(e) = self
+            .emit_audit_event("CA_CREATE", name, EventResult::Ok, actor, start)
+            .await
+        {
+            // Audit is a gate, not a hint. An unaudited CA create is a
+            // security regression — roll the CA out of the Store. Keep
+            // may retain the key copy; that is a safer failure mode than
+            // a persisted-but-unaudited CA.
+            if let Err(rollback_err) = self.cas.delete(name).await {
+                tracing::error!(
+                    ca = name,
+                    error = %rollback_err,
+                    "rollback of CA after audit failure itself failed"
+                );
+            }
+            return Err(e);
+        }
         // Refresh so the returned info reflects the cleared key_material.
         let ca = self.cas.get(name)?;
         Ok(ca_to_info(&ca))
