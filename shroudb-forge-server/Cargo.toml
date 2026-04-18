@@ -22,6 +22,9 @@ shroudb-protocol-wire = { workspace = true }
 shroudb-server-tcp = { workspace = true }
 shroudb-server-bootstrap = { workspace = true }
 shroudb-engine-bootstrap = { workspace = true }
+shroudb-keep-engine = { workspace = true }
+shroudb-keep-core = { workspace = true }
+shroudb-crypto = { workspace = true }
 tokio-rustls = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }
@@ -36,5 +39,6 @@ hex = { workspace = true }
 
 [dev-dependencies]
 shroudb-forge-client = { workspace = true }
+shroudb-storage = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"

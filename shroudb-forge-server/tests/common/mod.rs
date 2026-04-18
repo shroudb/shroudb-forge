@@ -153,6 +153,14 @@ http_bind = "{http_bind}"
 
 [store]
 mode = "embedded"
+
+[audit]
+mode = "disabled"
+justification = "integration tests: no Chronicle in fixture"
+
+[policy]
+mode = "disabled"
+justification = "integration tests: policy_mode = \"open\" covers test coverage"
 "#
     );
 

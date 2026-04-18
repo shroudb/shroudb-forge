@@ -1,15 +1,18 @@
 mod config;
 mod http;
+mod keep_embedded;
 mod tcp;
 
 use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
+use shroudb_crypto::SecretBytes;
 use shroudb_forge_core::ca::CaAlgorithm;
 use shroudb_forge_engine::ca_manager::CaCreateOpts;
 use shroudb_forge_engine::engine::{ForgeConfig, ForgeEngine};
 use shroudb_forge_engine::scheduler;
+use shroudb_keep_engine::engine::{KeepConfig as KeepEngineConfig, KeepEngine};
 use shroudb_store::Store;
 
 use crate::config::{ForgeServerConfig, load_config};
@@ -62,6 +65,13 @@ async fn main() -> anyhow::Result<()> {
         cfg.server.tcp_bind = bind.parse().context("invalid TCP bind address")?;
     }
 
+    // Embedded Keep (if configured) needs the same master key that Forge's
+    // storage is opened with — load it up front so both consumers share it.
+    let master_key = key_source
+        .load()
+        .await
+        .context("failed to load master key")?;
+
     // Store: embedded or remote
     match cfg.store.mode.as_str() {
         "embedded" => {
@@ -73,7 +83,8 @@ async fn main() -> anyhow::Result<()> {
                 storage.clone(),
                 "forge",
             ));
-            run_server(cfg, store, Some(storage)).await
+            let keep_handle = build_keep_embedded(&cfg, storage.clone(), master_key).await?;
+            run_server(cfg, store, Some(storage), keep_handle).await
         }
         "remote" => {
             let uri = cfg
@@ -87,16 +98,75 @@ async fn main() -> anyhow::Result<()> {
                     .await
                     .context("failed to connect to remote store")?,
             );
-            run_server(cfg, store, None).await
+            if let Some(ref keep_cfg) = cfg.keep
+                && keep_cfg.is_embedded()
+            {
+                anyhow::bail!(
+                    "keep.mode = \"embedded\" requires store.mode = \"embedded\" \
+                     (embedded Keep needs a co-located StorageEngine)"
+                );
+            }
+            run_server(cfg, store, None, None).await
         }
         other => anyhow::bail!("unknown store mode: {other}"),
     }
+}
+
+/// Build an embedded `KeepEngine` on a dedicated namespace of the same
+/// storage engine Forge uses. Returns `None` when `[keep]` is absent or
+/// not in embedded mode.
+async fn build_keep_embedded(
+    cfg: &ForgeServerConfig,
+    storage: Arc<shroudb_storage::StorageEngine>,
+    master_key: SecretBytes,
+) -> anyhow::Result<Option<KeepEmbeddedHandle>> {
+    let keep_cfg = match cfg.keep.as_ref() {
+        Some(k) => k,
+        None => return Ok(None),
+    };
+    keep_cfg
+        .validate(&cfg.store.mode)
+        .context("invalid [keep] config")?;
+    if !keep_cfg.is_embedded() {
+        return Ok(None);
+    }
+
+    let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "keep"));
+    let engine_cfg = KeepEngineConfig {
+        max_versions: keep_cfg.max_versions,
+    };
+    let engine = KeepEngine::new(
+        store,
+        engine_cfg,
+        master_key,
+        shroudb_server_bootstrap::Capability::disabled(
+            "forge-server embedded Keep: policy evaluation flows through Forge's own sentry slot",
+        ),
+        shroudb_server_bootstrap::Capability::disabled(
+            "forge-server embedded Keep: audit events flow through Forge's own chronicle slot",
+        ),
+    )
+    .await
+    .context("failed to initialize embedded Keep engine")?;
+
+    tracing::info!(
+        max_versions = keep_cfg.max_versions,
+        "embedded Keep engine initialized on 'keep' namespace"
+    );
+    Ok(Some(KeepEmbeddedHandle {
+        engine: Arc::new(engine),
+    }))
+}
+
+struct KeepEmbeddedHandle {
+    engine: Arc<KeepEngine<shroudb_storage::EmbeddedStore>>,
 }
 
 async fn run_server<S: Store + 'static>(
     cfg: ForgeServerConfig,
     store: Arc<S>,
     storage: Option<Arc<shroudb_storage::StorageEngine>>,
+    keep_embedded: Option<KeepEmbeddedHandle>,
 ) -> anyhow::Result<()> {
     use shroudb_server_bootstrap::Capability;
 
@@ -146,15 +216,27 @@ async fn run_server<S: Store + 'static>(
         _ => shroudb_forge_engine::engine::PolicyMode::Closed,
     };
 
-    // Keep capability at forge-server layer: Forge optionally persists
-    // issued private keys via Keep. The standalone server doesn't expose
-    // a [keep] config section today; embedded Keep is available by
-    // deploying via Moat. The slot is explicit DisabledWithJustification
-    // so operators see the posture at startup.
-    let keep_cap =
-        Capability::<Box<dyn shroudb_forge_engine::capabilities::ForgeKeepOps>>::disabled(
-            "forge-server standalone deploys use Moat for embedded Keep; direct wiring is follow-up scope",
-        );
+    // Keep capability: embedded (co-located KeepEngine), remote (follow-up),
+    // or explicit DisabledWithJustification when [keep] is absent.
+    let keep_cap: Capability<Box<dyn shroudb_forge_engine::capabilities::ForgeKeepOps>> =
+        match (cfg.keep.as_ref(), keep_embedded) {
+            (Some(keep_cfg), Some(handle)) if keep_cfg.is_embedded() => {
+                tracing::info!("forge: using embedded Keep for CA private-key persistence");
+                Capability::Enabled(Box::new(keep_embedded::EmbeddedForgeKeepOps::new(
+                    handle.engine,
+                )))
+            }
+            (Some(keep_cfg), _) if keep_cfg.is_remote() => {
+                anyhow::bail!(
+                    "keep.mode = \"remote\" is reserved — standalone remote Keep wiring \
+                     is follow-up scope. Use [keep] mode = \"embedded\", deploy via Moat, \
+                     or omit the [keep] section to run Forge without Keep."
+                );
+            }
+            _ => Capability::<Box<dyn shroudb_forge_engine::capabilities::ForgeKeepOps>>::disabled(
+                "forge: no [keep] config — issued CA private keys are not persisted through Keep",
+            ),
+        };
 
     let engine = Arc::new(
         ForgeEngine::new(

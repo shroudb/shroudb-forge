@@ -30,6 +30,74 @@ pub struct ForgeServerConfig {
     /// Policy (Sentry) capability slot. Same contract.
     #[serde(default)]
     pub policy: Option<PolicyConfig>,
+    /// Keep (CA private-key persistence) capability slot.
+    ///
+    /// Two modes:
+    /// - `mode = "remote"`: point at an external `shroudb-keep` server
+    /// - `mode = "embedded"`: bundle an in-process `KeepEngine` on the
+    ///   same `StorageEngine` as Forge's metadata (distinct namespace).
+    ///   Requires `store.mode = "embedded"`.
+    ///
+    /// Omit the section to run Forge without Keep — ForgeKeepOps is then
+    /// disabled and issued CA private keys are not persisted through Keep.
+    #[serde(default)]
+    pub keep: Option<KeepConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct KeepConfig {
+    #[serde(default = "default_keep_mode")]
+    pub mode: String,
+
+    /// Remote-mode address. Validation accepts `mode = "remote"` but the
+    /// TCP-client wiring lands in a follow-up — matches the same staged
+    /// rollout used for Stash's [cipher] slot.
+    #[serde(default)]
+    pub addr: Option<String>,
+
+    /// Maximum versions retained per Keep path (embedded mode).
+    #[serde(default = "default_keep_max_versions")]
+    pub max_versions: u32,
+}
+
+impl KeepConfig {
+    pub fn is_embedded(&self) -> bool {
+        self.mode == "embedded"
+    }
+
+    pub fn is_remote(&self) -> bool {
+        self.mode == "remote"
+    }
+
+    pub fn validate(&self, store_mode: &str) -> anyhow::Result<()> {
+        match self.mode.as_str() {
+            "remote" => {
+                if self.addr.is_none() {
+                    anyhow::bail!("keep.mode = \"remote\" requires keep.addr");
+                }
+            }
+            "embedded" => {
+                if store_mode != "embedded" {
+                    anyhow::bail!(
+                        "keep.mode = \"embedded\" requires store.mode = \"embedded\" \
+                         (embedded Keep shares the StorageEngine with Forge)"
+                    );
+                }
+            }
+            other => {
+                anyhow::bail!("unknown keep.mode: {other:?} (expected \"remote\" or \"embedded\")")
+            }
+        }
+        Ok(())
+    }
+}
+
+fn default_keep_mode() -> String {
+    "remote".into()
+}
+
+fn default_keep_max_versions() -> u32 {
+    10
 }
 
 fn default_policy_mode() -> String {
@@ -248,6 +316,49 @@ uri = "shroudb://token@127.0.0.1:6399"
             cfg.store.uri.as_deref(),
             Some("shroudb://token@127.0.0.1:6399")
         );
+    }
+
+    #[test]
+    fn config_parses_keep_embedded_mode() {
+        let toml = r#"
+[keep]
+mode = "embedded"
+max_versions = 5
+"#;
+        let cfg: ForgeServerConfig = toml::from_str(toml).expect("parse failed");
+        let keep = cfg.keep.expect("keep section present");
+        assert!(keep.is_embedded());
+        assert_eq!(keep.max_versions, 5);
+        keep.validate("embedded").expect("validate embedded ok");
+        assert!(
+            keep.validate("remote").is_err(),
+            "embedded requires embedded store"
+        );
+    }
+
+    #[test]
+    fn config_parses_keep_remote_requires_addr() {
+        let toml = r#"
+[keep]
+mode = "remote"
+"#;
+        let cfg: ForgeServerConfig = toml::from_str(toml).unwrap();
+        let keep = cfg.keep.unwrap();
+        assert!(keep.is_remote());
+        assert!(
+            keep.validate("embedded").is_err(),
+            "remote without addr fails"
+        );
+    }
+
+    #[test]
+    fn config_rejects_unknown_keep_mode() {
+        let toml = r#"
+[keep]
+mode = "nonsense"
+"#;
+        let cfg: ForgeServerConfig = toml::from_str(toml).unwrap();
+        assert!(cfg.keep.unwrap().validate("embedded").is_err());
     }
 
     #[test]
