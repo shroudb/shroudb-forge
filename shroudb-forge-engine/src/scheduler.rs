@@ -9,6 +9,12 @@ use tokio::sync::watch;
 
 use crate::engine::ForgeEngine;
 
+/// Actor string recorded on audit events emitted by the background
+/// scheduler. Uses the `system:<role>` namespace so automated security
+/// events are distinguishable from unauthenticated user traffic (which
+/// surfaces as the literal string `"anonymous"`).
+const SCHEDULER_ACTOR: &str = "system:scheduler";
+
 /// Start the background scheduler.
 ///
 /// If a `CourierOps` capability is configured on the engine, the scheduler
@@ -64,7 +70,10 @@ async fn run_cycle<S: Store>(engine: &ForgeEngine<S>) -> Result<(), String> {
                 .unwrap_or(0);
 
             if age_days >= ca.rotation_days as u64 {
-                match engine.ca_rotate(&name, true, false, None).await {
+                match engine
+                    .ca_rotate(&name, true, false, Some(SCHEDULER_ACTOR))
+                    .await
+                {
                     Ok(result) => {
                         tracing::info!(
                             ca = name,
@@ -109,7 +118,7 @@ async fn run_cycle<S: Store>(engine: &ForgeEngine<S>) -> Result<(), String> {
         // Regenerate CRL for CAs with active keys
         if let Some(active) = ca.active_key()
             && decode_key_material(active).is_ok()
-            && let Err(e) = engine.regenerate_crl(&name, None).await
+            && let Err(e) = engine.regenerate_crl(&name, Some(SCHEDULER_ACTOR)).await
         {
             tracing::warn!(ca = name, error = %e, "CRL regeneration failed");
         }
@@ -123,4 +132,23 @@ fn unix_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scheduler_actor_is_namespaced_system_not_anonymous() {
+        assert_ne!(
+            SCHEDULER_ACTOR, "anonymous",
+            "scheduler actor must be distinguishable from unauthenticated \
+             user traffic in audit events"
+        );
+        assert!(
+            SCHEDULER_ACTOR.starts_with("system:"),
+            "scheduler actor must use the `system:<role>` namespace so \
+             audit consumers can filter automated events; got {SCHEDULER_ACTOR:?}"
+        );
+    }
 }
