@@ -241,6 +241,36 @@ impl<S: Store> ForgeEngine<S> {
         }
     }
 
+    /// Return a `CaKeyVersion` with its `key_material` populated. When the
+    /// Store holds the material, this is a cheap clone. When the Store copy
+    /// has been cleared (Keep-only mode), this fetches from Keep at
+    /// `forge/{ca_name}/v{version}` and hex-encodes into the returned
+    /// clone. Fails closed if neither source can produce the key.
+    async fn hydrate_key_version(
+        &self,
+        ca_name: &str,
+        kv: &shroudb_forge_core::ca::CaKeyVersion,
+    ) -> Result<shroudb_forge_core::ca::CaKeyVersion, ForgeError> {
+        if kv.key_material.is_some() {
+            return Ok(kv.clone());
+        }
+        let Some(keep) = self.keep.as_ref() else {
+            return Err(ForgeError::NoActiveKey {
+                ca: ca_name.to_string(),
+            });
+        };
+        let path = format!("forge/{ca_name}/v{}", kv.version);
+        let bytes = keep.get_key(&path).await?;
+        if bytes.is_empty() {
+            return Err(ForgeError::NoActiveKey {
+                ca: ca_name.to_string(),
+            });
+        }
+        let mut hydrated = kv.clone();
+        hydrated.key_material = Some(hex::encode(&bytes));
+        Ok(hydrated)
+    }
+
     /// Emit an audit event to Chronicle. Fail-closed for security-critical
     /// operations — cert issuance and key rotation must not proceed unaudited.
     async fn emit_audit_event(
@@ -346,7 +376,10 @@ impl<S: Store> ForgeEngine<S> {
         // Initialize cert namespace for the new CA
         self.certs.init_for_ca(name).await?;
 
-        // Store key material in Keep for defense-in-depth encryption
+        // Store key material in Keep for defense-in-depth encryption. When
+        // Keep is configured it becomes the sole authoritative holder of
+        // the private key — the Store copy is cleared after a successful
+        // write so plaintext hex does not live in two places.
         if let Some(keep) = self.keep.as_ref() {
             let active = ca.active_key().ok_or_else(|| ForgeError::NoActiveKey {
                 ca: name.to_string(),
@@ -356,10 +389,14 @@ impl<S: Store> ForgeEngine<S> {
                 keep.store_key(&path, km.as_bytes()).await?;
                 tracing::info!(ca = name, version = active.version, "CA key stored in Keep");
             }
+            // Keep is now the authoritative holder — clear the Store copy.
+            self.cas.clear_active_key_material(name).await?;
         }
 
         self.emit_audit_event("CA_CREATE", name, EventResult::Ok, actor, start)
             .await?;
+        // Refresh so the returned info reflects the cleared key_material.
+        let ca = self.cas.get(name)?;
         Ok(ca_to_info(&ca))
     }
 
@@ -502,6 +539,8 @@ impl<S: Store> ForgeEngine<S> {
         let active = ca.active_key().ok_or_else(|| ForgeError::NoActiveKey {
             ca: ca_name.to_string(),
         })?;
+        let active_version = active.version;
+        let hydrated_active = self.hydrate_key_version(ca_name, active).await?;
 
         let profile = self
             .profiles
@@ -538,7 +577,7 @@ impl<S: Store> ForgeEngine<S> {
         }
 
         let issued = x509::issue_certificate(&x509::IssueCertParams {
-            ca_key_version: active,
+            ca_key_version: &hydrated_active,
             ca_subject: &ca.subject,
             ca_algorithm: ca.algorithm,
             subject,
@@ -552,7 +591,7 @@ impl<S: Store> ForgeEngine<S> {
         let cert_meta = IssuedCertificate {
             serial: issued.serial.clone(),
             ca_name: ca_name.to_string(),
-            ca_key_version: active.version,
+            ca_key_version: active_version,
             subject: subject.to_string(),
             profile: profile_name.to_string(),
             state: CertState::Active,
@@ -577,7 +616,7 @@ impl<S: Store> ForgeEngine<S> {
             serial: issued.serial,
             not_before: issued.not_before,
             not_after: issued.not_after,
-            ca_key_version: active.version,
+            ca_key_version: active_version,
         })
     }
 
@@ -601,6 +640,8 @@ impl<S: Store> ForgeEngine<S> {
         let active = ca.active_key().ok_or_else(|| ForgeError::NoActiveKey {
             ca: ca_name.to_string(),
         })?;
+        let active_version = active.version;
+        let hydrated_active = self.hydrate_key_version(ca_name, active).await?;
 
         let profile = self
             .profiles
@@ -643,13 +684,19 @@ impl<S: Store> ForgeEngine<S> {
             })
             .unwrap_or_else(|| "CSR".to_string());
 
-        let issued = x509::issue_from_csr(active, &ca.subject, ca.algorithm, csr_pem, ttl_secs)?;
+        let issued = x509::issue_from_csr(
+            &hydrated_active,
+            &ca.subject,
+            ca.algorithm,
+            csr_pem,
+            ttl_secs,
+        )?;
 
         let now = unix_now();
         let cert_meta = IssuedCertificate {
             serial: issued.serial.clone(),
             ca_name: ca_name.to_string(),
-            ca_key_version: active.version,
+            ca_key_version: active_version,
             subject: csr_subject,
             profile: profile_name.to_string(),
             state: CertState::Active,
@@ -674,7 +721,7 @@ impl<S: Store> ForgeEngine<S> {
             serial: issued.serial,
             not_before: issued.not_before,
             not_after: issued.not_after,
-            ca_key_version: active.version,
+            ca_key_version: active_version,
         })
     }
 
@@ -711,7 +758,8 @@ impl<S: Store> ForgeEngine<S> {
         let active = ca.active_key().ok_or_else(|| ForgeError::NoActiveKey {
             ca: ca_name.to_string(),
         })?;
-        let key_der = decode_key_material(active)?;
+        let hydrated_active = self.hydrate_key_version(ca_name, active).await?;
+        let key_der = decode_key_material(&hydrated_active)?;
         let mut revoked = self.certs.revoked_for_crl(ca_name);
         revoked.push(crl::CrlRevokedEntry {
             serial_hex: serial.to_string(),
@@ -828,7 +876,8 @@ impl<S: Store> ForgeEngine<S> {
             ca: ca_name.to_string(),
         })?;
 
-        let key_der = decode_key_material(active)?;
+        let hydrated_active = self.hydrate_key_version(ca_name, active).await?;
+        let key_der = decode_key_material(&hydrated_active)?;
         let revoked = self.certs.revoked_for_crl(ca_name);
 
         let crl_pem =

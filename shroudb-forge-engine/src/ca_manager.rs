@@ -228,6 +228,24 @@ impl<S: Store> CaManager<S> {
         Ok(ca)
     }
 
+    /// Clear the active key version's plaintext key material in the Store
+    /// (and cache). Used after Keep has accepted the material so the
+    /// private key lives in exactly one place. Zeroizes the hex string
+    /// before dropping.
+    pub async fn clear_active_key_material(&self, name: &str) -> Result<(), ForgeError> {
+        self.update(name, |ca| {
+            if let Some(active_key) = ca.active_key_mut()
+                && let Some(ref mut km) = active_key.key_material
+            {
+                km.zeroize();
+                active_key.key_material = None;
+            }
+            Ok(())
+        })
+        .await?;
+        Ok(())
+    }
+
     /// Retire draining keys that have exceeded the drain period.
     /// Zeroizes private key material before clearing it.
     pub async fn retire_draining_keys(&self, name: &str) -> Result<Vec<u32>, ForgeError> {
