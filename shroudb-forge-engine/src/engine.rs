@@ -817,6 +817,10 @@ impl<S: Store> ForgeEngine<S> {
         let crl_pem =
             crl::generate_crl_pem(key_der.as_bytes(), &ca.subject, ca.algorithm, &revoked)?;
 
+        // Snapshot the pre-revocation CRL (if any) so we can restore it
+        // when audit fails after we have committed the revocation.
+        let prev_crl_pem = self.certs.crl_pem(ca_name);
+
         // CRL succeeded — now commit the revocation to the Store.
         self.certs
             .update(ca_name, serial, |cert| {
@@ -829,8 +833,36 @@ impl<S: Store> ForgeEngine<S> {
         self.certs.set_crl_pem(ca_name, crl_pem);
 
         let resource = format!("{ca_name}/{serial}");
-        self.emit_audit_event("REVOKE", &resource, EventResult::Ok, actor, start)
-            .await?;
+        if let Err(e) = self
+            .emit_audit_event("REVOKE", &resource, EventResult::Ok, actor, start)
+            .await
+        {
+            // A revocation without an audit trail is a secret revocation.
+            // Restore the cert state and the prior CRL so operators see
+            // an un-revoked cert (which they can retry) rather than a
+            // silently-revoked one.
+            if let Err(rollback_err) = self
+                .certs
+                .update(ca_name, serial, |cert| {
+                    cert.state = CertState::Active;
+                    cert.revoked_at = None;
+                    cert.revocation_reason = None;
+                })
+                .await
+            {
+                tracing::error!(
+                    ca = ca_name,
+                    serial,
+                    error = %rollback_err,
+                    "rollback of revocation after audit failure itself failed"
+                );
+            }
+            match prev_crl_pem {
+                Some(pem) => self.certs.set_crl_pem(ca_name, pem),
+                None => self.certs.clear_crl_pem(ca_name),
+            }
+            return Err(e);
+        }
         tracing::info!(ca = ca_name, serial, "certificate revoked");
         Ok(())
     }

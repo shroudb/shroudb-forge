@@ -203,6 +203,13 @@ impl<S: Store> CertManager<S> {
     pub fn set_crl_pem(&self, ca_name: &str, pem: String) {
         self.crl_cache.insert(ca_name.to_string(), pem);
     }
+
+    /// Remove the cached CRL PEM for a CA, if any. Used to restore the
+    /// pre-revocation state when `revoke` rolls back after audit failure
+    /// and no CRL existed before the revocation.
+    pub fn clear_crl_pem(&self, ca_name: &str) {
+        self.crl_cache.remove(ca_name);
+    }
 }
 
 /// Summary of a certificate for list operations.
@@ -215,4 +222,35 @@ pub struct CertSummary {
     pub not_before: u64,
     pub not_after: u64,
     pub ca_key_version: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn clear_crl_pem_removes_cached_entry() {
+        let store = shroudb_storage::test_util::create_test_store("forge-cert-mgr-test").await;
+        let mgr = CertManager::new(store);
+        mgr.set_crl_pem(
+            "ca1",
+            "-----BEGIN X509 CRL-----\n...\n-----END X509 CRL-----".into(),
+        );
+        assert!(mgr.crl_pem("ca1").is_some());
+        mgr.clear_crl_pem("ca1");
+        assert!(
+            mgr.crl_pem("ca1").is_none(),
+            "clear_crl_pem must remove the cached CRL so revoke rollback \
+             restores the prior state when no CRL existed before"
+        );
+    }
+
+    #[tokio::test]
+    async fn clear_crl_pem_absent_is_noop() {
+        let store =
+            shroudb_storage::test_util::create_test_store("forge-cert-mgr-absent-test").await;
+        let mgr = CertManager::new(store);
+        mgr.clear_crl_pem("never-set");
+        assert!(mgr.crl_pem("never-set").is_none());
+    }
 }

@@ -21,6 +21,6 @@ Rules:
 - [x] **DEBT-2** — `ca_create` with Keep configured must clear Store's key_material (Keep becomes sole source). Test: `debt_2_ca_create_with_keep_must_clear_store_key_material` @ same file.
 - [x] **DEBT-3** — `ca_create` must rollback when Keep store fails (currently half-committed with plaintext in Store). Test: `debt_3_ca_create_must_rollback_when_keep_store_fails` @ same file.
 - [x] **DEBT-4** — `ca_create` must rollback when audit fails. Test: `debt_4_ca_create_must_rollback_when_audit_fails` @ same file.
-- [ ] **DEBT-5** — `revoke` must rollback when audit fails (currently: CRL already published, revocation done, audit missing). Test: `debt_5_revoke_must_rollback_when_audit_fails` @ same file.
+- [x] **DEBT-5** — `revoke` must rollback when audit fails (currently: CRL already published, revocation done, audit missing). Test: `debt_5_revoke_must_rollback_when_audit_fails` @ same file.
 - [ ] **DEBT-6** — `ForgeConfig` must have `require_keep` defaulting to `true`. Test: `debt_6_forge_config_must_have_require_keep_defaulting_true` @ same file.
 - [ ] **DEBT-7** — scheduler auto-rotation audit must not use `"anonymous"` actor (conflates with unauth traffic). Test: `debt_7_scheduler_auto_rotation_audit_must_not_use_anonymous` @ same file.
