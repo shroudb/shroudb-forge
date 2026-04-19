@@ -75,6 +75,7 @@ pub async fn dispatch<S: Store>(
             match engine.ca_create(&name, algo, opts, actor).await {
                 Ok(info) => ForgeResponse::ok(serde_json::json!({
                     "status": "ok",
+                    "name": info.name,
                     "ca": info.name,
                     "algorithm": info.algorithm,
                     "subject": info.subject,
@@ -89,6 +90,7 @@ pub async fn dispatch<S: Store>(
         ForgeCommand::CaInfo { ca } => match engine.ca_info(&ca) {
             Ok(info) => ForgeResponse::ok(serde_json::json!({
                 "status": "ok",
+                "name": info.name,
                 "ca": info.name,
                 "algorithm": info.algorithm,
                 "subject": info.subject,
