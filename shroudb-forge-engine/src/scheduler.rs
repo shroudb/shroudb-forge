@@ -86,6 +86,7 @@ async fn run_cycle<S: Store>(engine: &ForgeEngine<S>) -> Result<(), String> {
                                     "ops",
                                     "CA key rotated",
                                     &format!("CA '{}' rotated to v{}", name, result.key_version),
+                                    "forge-scheduler",
                                 )
                                 .await
                         {

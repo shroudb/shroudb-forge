@@ -32,6 +32,7 @@ fn recording_keep() -> (Box<dyn ForgeKeepOps>, Arc<RecordingKeep>) {
             &self,
             path: &str,
             key_material: &[u8],
+            _actor: &str,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, ForgeError>> + Send + '_>>
         {
             self.0
@@ -44,6 +45,7 @@ fn recording_keep() -> (Box<dyn ForgeKeepOps>, Arc<RecordingKeep>) {
         fn get_key(
             &self,
             _path: &str,
+            _actor: &str,
         ) -> std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<Vec<u8>, ForgeError>> + Send + '_>,
         > {
@@ -62,6 +64,7 @@ impl ForgeKeepOps for FailingKeep {
         &self,
         _path: &str,
         _key_material: &[u8],
+        _actor: &str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, ForgeError>> + Send + '_>>
     {
         Box::pin(async { Err(ForgeError::Internal("simulated keep failure".into())) })
@@ -69,6 +72,7 @@ impl ForgeKeepOps for FailingKeep {
     fn get_key(
         &self,
         _path: &str,
+        _actor: &str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, ForgeError>> + Send + '_>>
     {
         Box::pin(async { Err(ForgeError::Internal("simulated keep failure".into())) })

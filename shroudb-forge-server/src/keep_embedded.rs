@@ -31,27 +31,29 @@ impl<S: Store> EmbeddedForgeKeepOps<S> {
 }
 
 impl<S: Store + 'static> ForgeKeepOps for EmbeddedForgeKeepOps<S> {
-    fn store_key(&self, path: &str, key_material: &[u8]) -> BoxFut<'_, u64> {
+    fn store_key(&self, path: &str, key_material: &[u8], actor: &str) -> BoxFut<'_, u64> {
         use base64::Engine as _;
         let p = path.to_string();
         let b64 = base64::engine::general_purpose::STANDARD.encode(key_material);
+        let actor = actor.to_string();
         Box::pin(async move {
             let result = self
                 .engine
-                .put(&p, &b64, None)
+                .put(&p, &b64, Some(&actor))
                 .await
                 .map_err(|e| ForgeError::Internal(format!("keep put: {e}")))?;
             Ok(result.version as u64)
         })
     }
 
-    fn get_key(&self, path: &str) -> BoxFut<'_, Vec<u8>> {
+    fn get_key(&self, path: &str, actor: &str) -> BoxFut<'_, Vec<u8>> {
         use base64::Engine as _;
         let p = path.to_string();
+        let actor = actor.to_string();
         Box::pin(async move {
             let result = self
                 .engine
-                .get(&p, None, None)
+                .get(&p, None, Some(&actor))
                 .await
                 .map_err(|e| ForgeError::Internal(format!("keep get: {e}")))?;
             let bytes = base64::engine::general_purpose::STANDARD
@@ -93,10 +95,10 @@ mod tests {
         let path = "forge/ca-root/v1";
         let key = vec![0xAB; 64];
 
-        let version = ops.store_key(path, &key).await.expect("store_key");
+        let version = ops.store_key(path, &key, "test").await.expect("store_key");
         assert_eq!(version, 1, "first put yields version 1");
 
-        let fetched = ops.get_key(path).await.expect("get_key");
+        let fetched = ops.get_key(path, "test").await.expect("get_key");
         assert_eq!(fetched, key, "round-trip preserves key material");
     }
 
@@ -105,13 +107,13 @@ mod tests {
         let ops = build_ops().await;
         let path = "forge/ca-root/v1";
 
-        let v1 = ops.store_key(path, &[0x01; 32]).await.unwrap();
-        let v2 = ops.store_key(path, &[0x02; 32]).await.unwrap();
+        let v1 = ops.store_key(path, &[0x01; 32], "test").await.unwrap();
+        let v2 = ops.store_key(path, &[0x02; 32], "test").await.unwrap();
 
         assert_eq!(v1, 1);
         assert_eq!(v2, 2, "second put increments version");
 
-        let fetched = ops.get_key(path).await.unwrap();
+        let fetched = ops.get_key(path, "test").await.unwrap();
         assert_eq!(fetched, vec![0x02; 32], "get returns latest version");
     }
 }

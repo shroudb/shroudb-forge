@@ -1899,9 +1899,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-courier-core"
-version = "1.5.2"
+version = "2.0.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "1695b0f88a8e24512b84e1138144d6c7bdab9933749cd5ee94ce088a56bcd647"
+checksum = "b0f4ff18209683a65e374bef307f1764dc13948e15cd557e38018a2104651297"
 dependencies = [
  "serde",
  "serde_json",
@@ -1957,7 +1957,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-cli"
-version = "1.8.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1968,7 +1968,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-client"
-version = "1.8.0"
+version = "2.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1978,7 +1978,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-core"
-version = "1.8.0"
+version = "2.0.0"
 dependencies = [
  "hex",
  "pem",
@@ -1996,7 +1996,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-engine"
-version = "1.8.0"
+version = "2.0.0"
 dependencies = [
  "base64",
  "dashmap",
@@ -2022,7 +2022,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-protocol"
-version = "1.8.0"
+version = "2.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2040,7 +2040,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-forge-server"
-version = "1.8.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "axum",

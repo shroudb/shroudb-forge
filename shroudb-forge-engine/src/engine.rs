@@ -259,6 +259,7 @@ impl<S: Store> ForgeEngine<S> {
         &self,
         ca_name: &str,
         kv: &shroudb_forge_core::ca::CaKeyVersion,
+        actor: Option<&str>,
     ) -> Result<shroudb_forge_core::ca::CaKeyVersion, ForgeError> {
         if kv.key_material.is_some() {
             return Ok(kv.clone());
@@ -269,7 +270,7 @@ impl<S: Store> ForgeEngine<S> {
             });
         };
         let path = format!("forge/{ca_name}/v{}", kv.version);
-        let bytes = keep.get_key(&path).await?;
+        let bytes = keep.get_key(&path, actor.unwrap_or("anonymous")).await?;
         if bytes.is_empty() {
             return Err(ForgeError::NoActiveKey {
                 ca: ca_name.to_string(),
@@ -403,7 +404,10 @@ impl<S: Store> ForgeEngine<S> {
             };
             if let Some(ref km) = active.key_material {
                 let path = format!("forge/{name}/v{}", active.version);
-                match keep.store_key(&path, km.as_bytes()).await {
+                match keep
+                    .store_key(&path, km.as_bytes(), actor.unwrap_or("anonymous"))
+                    .await
+                {
                     Ok(_) => {
                         tracing::info!(
                             ca = name,
@@ -546,8 +550,12 @@ impl<S: Store> ForgeEngine<S> {
         // Store new key material in Keep for defense-in-depth encryption
         if let Some(keep) = self.keep.as_ref() {
             let path = format!("forge/{name}/v{new_version}");
-            keep.store_key(&path, generated.private_key.as_bytes())
-                .await?;
+            keep.store_key(
+                &path,
+                generated.private_key.as_bytes(),
+                actor.unwrap_or("anonymous"),
+            )
+            .await?;
             tracing::info!(
                 ca = name,
                 version = new_version,
@@ -598,7 +606,7 @@ impl<S: Store> ForgeEngine<S> {
             ca: ca_name.to_string(),
         })?;
         let active_version = active.version;
-        let hydrated_active = self.hydrate_key_version(ca_name, active).await?;
+        let hydrated_active = self.hydrate_key_version(ca_name, active, actor).await?;
 
         let profile = self
             .profiles
@@ -699,7 +707,7 @@ impl<S: Store> ForgeEngine<S> {
             ca: ca_name.to_string(),
         })?;
         let active_version = active.version;
-        let hydrated_active = self.hydrate_key_version(ca_name, active).await?;
+        let hydrated_active = self.hydrate_key_version(ca_name, active, actor).await?;
 
         let profile = self
             .profiles
@@ -816,7 +824,7 @@ impl<S: Store> ForgeEngine<S> {
         let active = ca.active_key().ok_or_else(|| ForgeError::NoActiveKey {
             ca: ca_name.to_string(),
         })?;
-        let hydrated_active = self.hydrate_key_version(ca_name, active).await?;
+        let hydrated_active = self.hydrate_key_version(ca_name, active, actor).await?;
         let key_der = decode_key_material(&hydrated_active)?;
         let mut revoked = self.certs.revoked_for_crl(ca_name);
         revoked.push(crl::CrlRevokedEntry {
@@ -966,7 +974,7 @@ impl<S: Store> ForgeEngine<S> {
             ca: ca_name.to_string(),
         })?;
 
-        let hydrated_active = self.hydrate_key_version(ca_name, active).await?;
+        let hydrated_active = self.hydrate_key_version(ca_name, active, actor).await?;
         let key_der = decode_key_material(&hydrated_active)?;
         let revoked = self.certs.revoked_for_crl(ca_name);
 
@@ -1421,6 +1429,7 @@ mod tests {
             &self,
             path: &str,
             key_material: &[u8],
+            _actor: &str,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64, ForgeError>> + Send + '_>>
         {
             self.stored
@@ -1433,6 +1442,7 @@ mod tests {
         fn get_key(
             &self,
             _path: &str,
+            _actor: &str,
         ) -> std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<Vec<u8>, ForgeError>> + Send + '_>,
         > {
@@ -1471,18 +1481,20 @@ mod tests {
                 &self,
                 path: &str,
                 key_material: &[u8],
+                actor: &str,
             ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<u64, ForgeError>> + Send + '_>,
             > {
-                self.0.store_key(path, key_material)
+                self.0.store_key(path, key_material, actor)
             }
             fn get_key(
                 &self,
                 path: &str,
+                actor: &str,
             ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<Vec<u8>, ForgeError>> + Send + '_>,
             > {
-                self.0.get_key(path)
+                self.0.get_key(path, actor)
             }
         }
 
@@ -1516,18 +1528,20 @@ mod tests {
                 &self,
                 path: &str,
                 key_material: &[u8],
+                actor: &str,
             ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<u64, ForgeError>> + Send + '_>,
             > {
-                self.0.store_key(path, key_material)
+                self.0.store_key(path, key_material, actor)
             }
             fn get_key(
                 &self,
                 path: &str,
+                actor: &str,
             ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<Vec<u8>, ForgeError>> + Send + '_>,
             > {
-                self.0.get_key(path)
+                self.0.get_key(path, actor)
             }
         }
 
