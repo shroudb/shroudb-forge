@@ -78,10 +78,3 @@ hex = "0.4"
 base64 = "0.22"
 dashmap = "6"
 libc = "0.2"
-
-# Temporary: point shroudb-engine-bootstrap at the local unpublished 0.3.0
-# source so we can consume the embedded-by-default behavior for [audit] and
-# [policy] before the crate is pushed to the shroudb registry. Remove this
-# [patch] section once shroudb-engine-bootstrap 0.3.0 is published.
-[patch.shroudb]
-shroudb-engine-bootstrap = { path = "../commons/shroudb-engine-bootstrap" }

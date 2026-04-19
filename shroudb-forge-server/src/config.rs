@@ -30,10 +30,12 @@ pub struct ForgeServerConfig {
     /// `mode = "disabled" justification = "<reason>"` to run without audit.
     #[serde(default)]
     pub audit: Option<AuditConfig>,
-    /// Policy (Sentry) capability slot. Absent = defaults to embedded
-    /// Sentry on the shared storage engine (see
-    /// `shroudb_engine_bootstrap::PolicyConfig::default`). Set
-    /// `mode = "disabled" justification = "<reason>"` to run without policy.
+    /// Policy (Sentry) capability slot. Absent = defaults to disabled
+    /// with an auto-generated justification (engine-bootstrap 0.3.0+:
+    /// empty embedded Sentry would deny every request, so permissive
+    /// out-of-box is the pragmatic default). Operators opt into
+    /// enforcement via `[policy] mode = "embedded"` (with seeded rules)
+    /// or `"remote"`.
     #[serde(default)]
     pub policy: Option<PolicyConfig>,
     /// Keep (CA private-key persistence) capability slot.
