@@ -200,9 +200,12 @@ default workspace member. It:
   `EmbeddedStore` namespaced `"forge"`) or `remote` (connects to a
   ShrouDB server via `shroudb_client::RemoteStore`).
 - Resolves `[audit]` and `[policy]` capability sections via
-  `shroudb-engine-bootstrap` — both are **required** in config, with
-  modes `remote` / `embedded` / `disabled` (the last requiring a
-  `justification = "<reason>"`). There is no silent fallback.
+  `shroudb-engine-bootstrap`. Both sections are **optional** — when
+  omitted, the server defaults to `mode = "embedded"` and wires
+  in-process Chronicle / Sentry on the shared storage engine. Opt out
+  explicitly with `mode = "disabled" justification = "<reason>"`, or
+  point at an external service with `mode = "remote"`. Init failures
+  surface — they are not swallowed.
 - Builds the Keep slot from the optional `[keep]` config section. When
   `keep.mode = "embedded"` and `store.mode = "embedded"`, the server
   spins up an in-process `KeepEngine` on a dedicated `"keep"`

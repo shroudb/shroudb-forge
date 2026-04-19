@@ -24,10 +24,16 @@ pub struct ForgeServerConfig {
     /// Set to "open" only for development/testing.
     #[serde(default = "default_policy_mode")]
     pub policy_mode: String,
-    /// Audit (Chronicle) capability slot. Absent = fail-closed at startup.
+    /// Audit (Chronicle) capability slot. Absent = defaults to embedded
+    /// Chronicle on the shared storage engine (see
+    /// `shroudb_engine_bootstrap::AuditConfig::default`). Set
+    /// `mode = "disabled" justification = "<reason>"` to run without audit.
     #[serde(default)]
     pub audit: Option<AuditConfig>,
-    /// Policy (Sentry) capability slot. Same contract.
+    /// Policy (Sentry) capability slot. Absent = defaults to embedded
+    /// Sentry on the shared storage engine (see
+    /// `shroudb_engine_bootstrap::PolicyConfig::default`). Set
+    /// `mode = "disabled" justification = "<reason>"` to run without policy.
     #[serde(default)]
     pub policy: Option<PolicyConfig>,
     /// Keep (CA private-key persistence) capability slot.

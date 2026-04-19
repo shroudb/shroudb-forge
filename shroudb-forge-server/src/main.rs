@@ -170,27 +170,16 @@ async fn run_server<S: Store + 'static>(
 ) -> anyhow::Result<()> {
     use shroudb_server_bootstrap::Capability;
 
-    // Resolve [audit] and [policy] capabilities — no silent None.
-    let audit_cfg = cfg.audit.clone().ok_or_else(|| {
-        anyhow::anyhow!(
-            "missing [audit] config section. Pick one:\n  \
-             [audit] mode = \"remote\" addr = \"chronicle.internal:7300\"\n  \
-             [audit] mode = \"embedded\"\n  \
-             [audit] mode = \"disabled\" justification = \"<reason>\""
-        )
-    })?;
+    // Resolve [audit] and [policy] capabilities. Both default to embedded
+    // (per shroudb-engine-bootstrap 0.3.0) when the section is absent — the
+    // server wires an in-process Chronicle / Sentry on the shared storage
+    // engine. Init failures surface as Err; they are not silently swallowed.
+    let audit_cfg = cfg.audit.clone().unwrap_or_default();
     let audit_cap = audit_cfg
         .resolve(storage.clone())
         .await
         .context("failed to resolve [audit] capability")?;
-    let policy_cfg = cfg.policy.clone().ok_or_else(|| {
-        anyhow::anyhow!(
-            "missing [policy] config section. Pick one:\n  \
-             [policy] mode = \"remote\" addr = \"sentry.internal:7100\"\n  \
-             [policy] mode = \"embedded\"\n  \
-             [policy] mode = \"disabled\" justification = \"<reason>\""
-        )
-    })?;
+    let policy_cfg = cfg.policy.clone().unwrap_or_default();
     let policy_cap = policy_cfg
         .resolve(storage.clone(), audit_cap.as_ref().cloned())
         .await

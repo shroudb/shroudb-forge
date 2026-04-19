@@ -4,6 +4,17 @@ All notable changes to ShrouDB Forge are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [v1.8.0] - 2026-04-18
+
+### Changed
+
+- `[audit]` and `[policy]` now default to `mode = "embedded"` when the
+  section is omitted (via `shroudb-engine-bootstrap` 0.3.0). Previously
+  a missing section was a startup failure; servers with no explicit
+  audit/policy config now wire an in-process Chronicle / Sentry on the
+  shared storage engine. Opt out explicitly with
+  `mode = "disabled" justification = "<reason>"`.
+
 ## [v1.5.9] - 2026-04-09
 
 - Version bump release
