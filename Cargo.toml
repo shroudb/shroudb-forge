@@ -41,7 +41,7 @@ shroudb-server-tcp = { version = "0.2.2", registry = "shroudb" }
 shroudb-server-bootstrap = { version = "0.2.0", registry = "shroudb" }
 shroudb-engine-bootstrap = { version = "0.3.0", registry = "shroudb" }
 shroudb-client-common = { version = "0.2.0", registry = "shroudb" }
-shroudb-courier-core = { version = "2.0.1", registry = "shroudb" }
+shroudb-courier-core = { version = "2.0.0", registry = "shroudb" }
 
 # Crypto / X.509
 ring = "0.17"
