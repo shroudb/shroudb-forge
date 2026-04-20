@@ -276,8 +276,14 @@ impl<S: Store> ForgeEngine<S> {
                 ca: ca_name.to_string(),
             });
         }
+        // `key_material` was stored as `String.as_bytes()` of the hex-encoded
+        // DER (see ca_create / rotate). Keep round-trips those bytes as-is,
+        // so reconstruct the hex string directly — hex-encoding again would
+        // double-encode and break the downstream DER parser.
+        let hex_string = String::from_utf8(bytes)
+            .map_err(|e| ForgeError::Internal(format!("stored CA key material not UTF-8: {e}")))?;
         let mut hydrated = kv.clone();
-        hydrated.key_material = Some(hex::encode(&bytes));
+        hydrated.key_material = Some(hex_string);
         Ok(hydrated)
     }
 
