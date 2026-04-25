@@ -24,10 +24,15 @@ pub struct ForgeServerConfig {
     /// Set to "open" only for development/testing.
     #[serde(default = "default_policy_mode")]
     pub policy_mode: String,
-    /// Audit (Chronicle) capability slot. Absent = defaults to embedded
-    /// Chronicle on the shared storage engine (see
-    /// `shroudb_engine_bootstrap::AuditConfig::default`). Set
-    /// `mode = "disabled" justification = "<reason>"` to run without audit.
+    /// Audit (Chronicle) capability slot. Absent = use
+    /// `AuditConfig::default()`, which is `mode = "disabled"` with an
+    /// auto-generated justification (engine-bootstrap 0.4.0+). Audit-on
+    /// requires an authenticated actor and `[auth]` itself defaults to
+    /// no validator — audit-by-default would deterministically fail
+    /// every audited op out-of-box. Operators opt into audit via
+    /// `mode = "embedded"` (shared storage) or `mode = "remote"`. The
+    /// server refuses to start when audit is enabled but `[auth].tokens`
+    /// is empty.
     #[serde(default)]
     pub audit: Option<AuditConfig>,
     /// Policy (Sentry) capability slot. Absent = defaults to disabled
